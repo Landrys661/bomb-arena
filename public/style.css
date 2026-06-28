@@ -336,6 +336,9 @@ body.touch .controls { display: none; }        /* hide keyboard hint on touch */
 
 /* ---- input lock (mobile): no pull-to-refresh / overscroll glow ---- */
 html, body { overscroll-behavior: none; }
+/* native safe-area insets (notches / home indicator) for installed apps */
+body { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+body.touch .touch-controls { padding-left: calc(10px + env(safe-area-inset-left)); padding-right: calc(10px + env(safe-area-inset-right)); padding-bottom: env(safe-area-inset-bottom); }
 body.touch { user-select: none; -webkit-user-select: none; }
 body.touch .canvas-wrap, body.touch #game-canvas, body.touch .touch-controls { touch-action: none; }
 

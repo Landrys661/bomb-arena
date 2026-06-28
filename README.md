@@ -1,110 +1,146 @@
 # 💣 Bomb Arena
 
-A retro, **Bomberman-style real-time multiplayer** arena battler that runs in the
-browser. Join a room, move on a grid, drop bombs, blow up crates and each other —
-last blob standing wins the round. Server-authoritative, no build step, no assets
-(everything is drawn on a canvas and every sound is synthesized with WebAudio).
+A retro, **Bomberman-style real-time multiplayer** arena battler. One shared
+vanilla-JS canvas client runs three ways — **web (dev), desktop (Electron), and
+mobile (Capacitor)** — all talking to the same authoritative Node + Socket.io
+server. No game-logic framework, no bundler, no asset files (all graphics + audio
+are generated in code; only the *Press Start 2P* web font is loaded).
 
-![stack](https://img.shields.io/badge/node-express-green) ![rt](https://img.shields.io/badge/realtime-socket.io-blue)
-
----
-
-## Tech stack
-
-- **Server:** Node.js + Express (static client) + Socket.io (rooms / realtime).
-- **Client:** Vanilla JS + HTML5 Canvas. No React, no bundler, no build step.
-- **State:** In-memory only (no database).
-- **Assets:** None. Graphics are drawn in code; SFX are square-wave chiptune via
-  the WebAudio API. The only external resource is the *Press Start 2P* Google Font.
-- **Architecture:** **Server-authoritative.** The server owns all state, runs a
-  fixed 30 tick/s simulation, validates every move and bomb, and broadcasts compact
-  snapshots. Clients only send inputs and render the latest snapshot.
+- **Server:** Node + Express (serves the client) + Socket.io (rooms, realtime). Authoritative, fixed 30 ticks/sec.
+- **Client:** Vanilla JS + HTML5 Canvas. Persistence = `localStorage` only (profile, XP, coins, loadout, cosmetics).
+- **Features:** XP/leveling, unlockable loadouts (7 bomb types, 5 abilities, 4 classes), in-match power-ups + curses, 6 distinct themed arenas with hazards, private rooms (personal loadouts + house rules) vs Quick Play (balanced), match-to-3, PWA install.
 
 ---
 
-## Run locally
+## 1. Run locally (web / dev) — fastest way to test
 
-Requires **Node.js 18+**.
+Requires **Node 18+**.
 
 ```bash
 npm install
 npm start
 ```
 
-Then open **two** browser tabs at <http://localhost:3000>.
+Open **two tabs** at <http://localhost:3000>. In each: pick a name (and a kit via
+**LOADOUT & COLLECTION**) → **QUICK PLAY** (or **CREATE ROOM** / **JOIN**) → **READY**.
+Two+ ready players starts a match.
 
-1. In tab 1: type a name → **Create Room** (note the 4-letter code) → click **READY**.
-2. In tab 2: type a name → enter the code → **Join** → click **READY**.
-   (Or just hit **Quick Play** in both tabs to be matched automatically.)
-3. When 2+ players are all READY a 3-second countdown starts the match.
+**Controls:** Arrows/WASD move · **Space** bomb · **E** ability · **Q** detonate (remote bombs).
+Touch devices get an on-screen D-pad + Bomb/Ability/Detonate buttons automatically.
 
-**Controls:** Arrow keys / **WASD** to move, **Space** (or **X**) to drop a bomb.
-
-> Tip: click the page once before playing so the browser allows audio.
-
----
-
-## How to play
-
-- **Map:** 13×11 grid. Gray blocks are indestructible; brown crates can be blown up.
-- **Bombs:** drop one on your tile; it explodes after 3 seconds in a `+` cross.
-  Explosions are blocked by walls and destroy the first crate they hit per direction.
-  A blast that reaches another bomb **chain-detonates** it.
-- **Power-ups** (drop from ~30% of crates):
-  - **B** Extra Bomb — +1 max active bombs
-  - **R** Bigger Blast — +1 explosion range
-  - **S** Speed Up — move faster (capped)
-- **Win:** last player alive wins the round (+1 point). Everyone dying on the same
-  tick is a draw. After a 3-second results screen the map regenerates and the next
-  round starts automatically. A running scoreboard persists across rounds.
-- Closing a tab removes that player cleanly; empty rooms are deleted.
+> The **Settings** screen has a **Server URL** field. Leave it blank on the web to
+> use the current site. The desktop/mobile apps use it to find your hosted server.
 
 ---
 
-## Deploy online (free, websockets enabled)
+## 2. Desktop app (Electron)
 
-The server reads its port from `process.env.PORT` (falling back to `3000`), so it
-works on any Node host with WebSocket support. Example using **Render**:
+Electron wraps the *same* client. By default it **hosts a match locally** (great
+for LAN / same-network play — others join at your machine's `IP:3000`); to play on
+an internet-hosted server instead, open in-app **Settings → Server URL**.
 
-1. Push this folder to a GitHub repo.
-2. On <https://render.com> → **New → Web Service** → connect the repo.
-3. Settings:
-   - **Environment:** Node
-   - **Build Command:** `npm install`
-   - **Start Command:** `npm start`
-   - **Instance type:** Free
-4. Deploy. Render injects `PORT` automatically and supports WebSockets out of the
-   box — no extra config needed. Open the public URL in two tabs / two devices.
+```bash
+npm install            # installs Electron (dev dependency, ~large download)
+npm run electron       # run the desktop app (hosts locally by default)
+npm run electron:nohost   # run as a pure client (uses the Settings server URL)
+```
 
-**Railway / Fly.io** work the same way: they set `PORT` for you and run
-`npm install` then `npm start`. Just make sure WebSockets are enabled (default on
-all three). No environment variables are required.
+Build installers:
+
+```bash
+npm run dist           # → dist/ : Windows .exe (NSIS), macOS .dmg, or Linux AppImage
+```
+
+- **Requirements:** just Node + this repo. Building a **Windows** installer is
+  easiest on Windows; a **macOS .dmg** must be built on a Mac.
+- **App icon:** `public/icon.svg` is the source art. `electron-builder` wants a
+  `.ico` (Windows) / `.icns` (mac); generate them from the SVG (e.g. an icon
+  converter) and add `"icon"` paths under `build.win` / `build.mac` in
+  `package.json`. Without it you get the default Electron icon (still runnable).
+
+---
+
+## 3. Mobile app (Capacitor)
+
+Capacitor wraps `public/` into native iOS/Android projects that connect to your
+**hosted** server. Set the server first so the app knows where to connect:
+
+- Easiest: open the app → **Settings → Server URL** → paste your hosted URL.
+- Or bake a default: set `DEFAULT_SERVER_URL` at the top of
+  [`public/client.js`](public/client.js) to your hosted URL before building.
+
+```bash
+npm install
+npx cap init "Bomb Arena" com.bombarena.app --web-dir=public   # already configured in capacitor.config.json
+npm run cap:add:android      # creates android/  (needs Android Studio)
+npm run cap:add:ios          # creates ios/      (needs macOS + Xcode)
+npm run cap:sync             # copy web assets + plugins into native projects
+npm run cap:open:android     # open in Android Studio → Run / build APK
+npm run cap:open:ios         # open in Xcode → Run / Archive
+```
+
+- **Android:** needs **Android Studio** (SDK + an emulator or a device).
+- **iOS:** needs a **Mac + Xcode + an Apple Developer account** to run on a device
+  or submit to the App Store. This **cannot be built on Windows.**
+- Orientation is requested as **landscape** (PWA manifest + a runtime lock); for a
+  hard lock, set it in the generated native projects (AndroidManifest /
+  Info.plist). Safe-area insets are handled in CSS.
+
+> Prefer not to build native? The web app is already an **installable PWA** — open
+> the hosted URL on your phone and "Add to Home Screen" / "Install app" for a
+> fullscreen home-screen app (see §5).
+
+---
+
+## 4. Host the server online (required for internet play)
+
+The server reads `process.env.PORT` (fallback 3000) and supports WebSockets, so it
+runs on any Node host. This repo includes a **Render blueprint** (`render.yaml`).
+
+**Render (free):**
+1. Push this repo to GitHub.
+2. On <https://render.com> → **New + → Blueprint** → pick the repo → **Apply**.
+   (The blueprint sets build `npm install --omit=dev` and start `npm start`.)
+3. You get a permanent URL like `https://bomb-arena-xxxx.onrender.com`.
+
+Put that URL in the apps' **Settings → Server URL** (or `DEFAULT_SERVER_URL`).
+
+> Free tier sleeps after ~15 min idle; the first visit then waits ~30–60s to wake.
+> State is in-memory by design, so a restart/redeploy clears active rooms.
+> **LAN play needs no hosting** — the Electron app hosts locally.
+
+---
+
+## 5. Install as a phone app (PWA, no native build)
+
+With the server hosted, open the URL on your phone:
+- **iPhone (Safari):** Share → **Add to Home Screen**.
+- **Android (Chrome):** **Install app** button, or ⋮ menu → **Install app**.
+
+Launches fullscreen in landscape.
 
 ---
 
 ## Project structure
 
 ```
-server.js          Express + Socket.io, rooms, authoritative game loop
-public/index.html  canvas + lobby UI
-public/client.js   rendering, input, socket handling, WebAudio SFX
-public/style.css   retro styling, CRT scanline overlay, pixel font
-package.json       deps (express, socket.io) + "start" script
-README.md          this file
+server.js              Express + Socket.io, authoritative sim, arenas, match flow
+public/index.html      screens: landing, settings, collection, lobby, game
+public/client.js       rendering, input, sockets, profile, themes, PWA
+public/shared.js       loadout catalog + XP curve (shared by server & client)
+public/style.css       retro styling, CRT overlay, mobile/touch, safe-area
+public/manifest.webmanifest, sw.js, icon.svg   PWA
+electron/main.js       desktop wrapper (host-locally / join)
+capacitor.config.json  mobile wrapper config
+render.yaml            one-click server deploy
 ```
-
-All gameplay tuning constants live at the top of `server.js` (authoritative);
-render-relevant constants are mirrored at the top of `public/client.js`.
 
 ---
 
-## Networking protocol
+## Networking protocol (summary)
 
-**Client → Server:** `joinRoom {name, roomCode|null}`, `quickPlay {name}`,
-`setReady {ready}`, `input {dir}` (`up|down|left|right|none`), `placeBomb`,
-`leaveRoom`.
-
-**Server → Client:** `roomState {roomCode, players[], phase, countdown}`,
-`gameStart {map, players, spawns}`, `state {tick, players[], bombs[], explosions[],
-powerups[], crates[]}` (every tick, minimal payload), `roundOver {winnerId, scores}`,
-`errorMsg {message}`.
+**Client → Server:** `joinRoom`, `quickPlay`, `setLoadout`, `setReady`,
+`setArena`, `setHouseRule`, `input {dir}`, `placeBomb`, `useAbility`,
+`detonate`, `leaveRoom`.
+**Server → Client:** `roomState`, `gameStart`, `state` (per tick), `roundOver`,
+`matchOver`, `errorMsg`.

@@ -4,7 +4,15 @@
   "description": "Bomb Arena - a retro real-time multiplayer Bomberman-style arena battler.",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "electron": "electron electron/main.js",
+    "electron:nohost": "cross-env BOMB_ARENA_NOHOST=1 electron electron/main.js",
+    "dist": "electron-builder",
+    "cap:sync": "cap sync",
+    "cap:add:android": "cap add android",
+    "cap:add:ios": "cap add ios",
+    "cap:open:android": "cap open android",
+    "cap:open:ios": "cap open ios"
   },
   "engines": {
     "node": ">=18"
@@ -12,5 +20,22 @@
   "dependencies": {
     "express": "^4.19.2",
     "socket.io": "^4.7.5"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3",
+    "cross-env": "^7.0.3",
+    "@capacitor/cli": "^6.1.0",
+    "@capacitor/core": "^6.1.0",
+    "@capacitor/android": "^6.1.0",
+    "@capacitor/ios": "^6.1.0"
+  },
+  "build": {
+    "appId": "com.bombarena.app",
+    "productName": "Bomb Arena",
+    "files": ["server.js", "electron/**", "public/**", "package.json", "node_modules/**"],
+    "win": { "target": "nsis" },
+    "mac": { "target": "dmg", "category": "public.app-category.games" },
+    "linux": { "target": "AppImage" }
   }
 }

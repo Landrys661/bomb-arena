@@ -5,7 +5,7 @@ services:
     name: bomb-arena
     runtime: node
     plan: free
-    buildCommand: npm install
+    buildCommand: npm install --omit=dev
     startCommand: npm start
     autoDeploy: true
     envVars:

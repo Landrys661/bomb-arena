@@ -14,6 +14,17 @@
 
 /* ---- 1. constants + shared -------------------------------------------- */
 const SHARED = window.SHARED;
+
+// Where the multiplayer server lives. Web builds connect to their own origin;
+// native (Electron/Capacitor) builds load from file://|capacitor:// and need a
+// hosted URL. Order: saved Settings value > native default > same-origin.
+const DEFAULT_SERVER_URL = '';   // <-- baked default for native apps (Render URL)
+function resolveServerUrl() {
+  try { const s = localStorage.getItem('bombArenaServer'); if (s) return s; } catch (e) {}
+  if (location.protocol === 'http:' || location.protocol === 'https:') return ''; // same-origin
+  return DEFAULT_SERVER_URL;      // file:// / capacitor:// -> use baked default
+}
+const SERVER_URL = resolveServerUrl();
 const COLS = 13, ROWS = 11;
 const TILE = 32, PX = 2;
 const COLORS = ['#fcfcfc', '#e84040', '#5878fc', '#48b048'];
@@ -137,7 +148,7 @@ function addRewards(mine) {
 }
 
 /* ---- 5. socket + screens --------------------------------------------- */
-const socket = io();
+const socket = SERVER_URL ? io(SERVER_URL, { transports: ['websocket'] }) : io();
 let myId = null, mySlot = null;
 let mapGrid = null, snapshot = null, phase = 'landing';
 let roster = [];                 // lobby/scoreboard rows
@@ -149,7 +160,7 @@ let curTheme = null, ambient = [];
 let seenBombs = new Set(), prevPU = new Map(), prevAlive = {}, prevCurse = {};
 
 const $ = id => document.getElementById(id);
-const screens = { landing: $('landing'), collection: $('collection'), lobby: $('lobby'), game: $('game') };
+const screens = { landing: $('landing'), settings: $('settings'), collection: $('collection'), lobby: $('lobby'), game: $('game') };
 function showScreen(name) { for (const k in screens) screens[k].classList.toggle('hidden', k !== name); }
 
 socket.on('connect', () => { myId = socket.id; });
@@ -355,6 +366,30 @@ function refreshLanding() {
 }
 refreshLanding();
 
+/* ---- Settings (server URL) ---- */
+function updateServerStatus() {
+  const el = $('serverStatus'); if (!el) return;
+  const target = SERVER_URL || (location.host || 'this site');
+  el.textContent = (socket.connected ? '● CONNECTED' : '○ connecting') + ' — ' + target;
+  el.style.color = socket.connected ? 'var(--p4)' : 'var(--dim)';
+}
+function openSettings() {
+  ensureAudio(); showScreen('settings');
+  let saved = ''; try { saved = localStorage.getItem('bombArenaServer') || ''; } catch (e) {}
+  $('serverInput').value = saved;
+  updateServerStatus();
+}
+if ($('settingsBtn')) $('settingsBtn').onclick = openSettings;
+if ($('settingsBack')) $('settingsBack').onclick = () => showScreen('landing');
+if ($('serverSave')) $('serverSave').onclick = () => {
+  const v = $('serverInput').value.trim();
+  try { if (v) localStorage.setItem('bombArenaServer', v); else localStorage.removeItem('bombArenaServer'); } catch (e) {}
+  location.reload();
+};
+if ($('serverReset')) $('serverReset').onclick = () => { try { localStorage.removeItem('bombArenaServer'); } catch (e) {} location.reload(); };
+socket.on('connect', updateServerStatus);
+socket.on('disconnect', updateServerStatus);
+
 let isReady = false;
 $('readyBtn').onclick = () => {
   ensureAudio(); isReady = !isReady;
@@ -402,6 +437,8 @@ window.addEventListener('keydown', (e) => {
 window.addEventListener('keyup', (e) => { if (isTyping(e)) return; const dir = KEYDIR[e.key.toLowerCase()]; if (dir) releaseDir(dir); });
 
 if (('ontouchstart' in window) || navigator.maxTouchPoints > 0) document.body.classList.add('touch');
+// best-effort landscape lock for installed/native builds (ignored on web)
+try { if (screen.orientation && screen.orientation.lock) screen.orientation.lock('landscape').catch(() => {}); } catch (e) {}
 document.querySelectorAll('#touch .dir').forEach((btn) => {
   const dir = btn.dataset.dir;
   const down = (e) => { e.preventDefault(); ensureAudio(); pressDir(dir); btn.classList.add('active'); };

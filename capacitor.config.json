@@ -1,0 +1,8 @@
+{
+  "appId": "com.bombarena.app",
+  "appName": "Bomb Arena",
+  "webDir": "public",
+  "server": { "androidScheme": "https" },
+  "android": { "backgroundColor": "#0b0b16" },
+  "ios": { "backgroundColor": "#0b0b16", "contentInset": "always" }
+}

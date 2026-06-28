@@ -111,9 +111,14 @@ const io = new Server(server);
 app.use(express.static(path.join(__dirname, 'public')));
 
 const PORT = process.env.PORT || 3000;
-if (require.main === module) {
-  server.listen(PORT, () => console.log(`Bomb Arena listening on :${PORT}`));
+// startServer() lets the Electron app host a match in-process ("Host Locally").
+function startServer(port) {
+  const p = port || PORT;
+  return server.listen(p, () => console.log(`Bomb Arena listening on :${p}`));
 }
+// Only auto-listen when run directly (`node server.js`); stays silent when
+// required by a test harness or the Electron main process.
+if (require.main === module) startServer(PORT);
 
 /* ----------------------------------------------------------------------------
  * 3. ROOM / LOBBY MANAGEMENT
@@ -1022,6 +1027,7 @@ io.on('connection', (socket) => {
 
 // Exported for the test harness (no effect on `npm start`).
 module.exports = {
+  startServer,
   generateMap, generateArena, simulate, detonate, addExplosion,
   ARENAS, COLS, ROWS, EMPTY, WALL, CRATE, TEMPWALL, BOMB_FUSE_TICKS,
 };

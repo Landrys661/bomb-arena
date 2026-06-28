@@ -33,9 +33,21 @@
       </div>
       <button id="quickBtn" class="btn btn-accent">QUICK PLAY</button>
       <button id="loadoutBtn" class="btn btn-dim">LOADOUT &amp; COLLECTION</button>
+      <button id="settingsBtn" class="btn btn-dim">SETTINGS</button>
       <button id="installBtn" class="btn btn-accent hidden">INSTALL APP</button>
       <p id="landingStats" class="stats-line"></p>
       <p id="landingMsg" class="msg"></p>
+    </section>
+
+    <!-- ===== SETTINGS ===== -->
+    <section id="settings" class="screen hidden">
+      <h2 class="room-title">SETTINGS</h2>
+      <p class="stats-line">SERVER URL — where matches are hosted. Leave blank on the web to use this site; the installed apps use this to find your server.</p>
+      <input id="serverInput" class="field" placeholder="https://your-server.onrender.com" autocomplete="off" />
+      <p id="serverStatus" class="stats-line"></p>
+      <button id="serverSave" class="btn">SAVE &amp; RECONNECT</button>
+      <button id="serverReset" class="btn btn-dim">USE DEFAULT</button>
+      <button id="settingsBack" class="btn btn-dim">BACK</button>
     </section>
 
     <!-- ===== COLLECTION / LOADOUT ===== -->

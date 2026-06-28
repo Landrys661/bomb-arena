@@ -263,6 +263,42 @@ body.touch .controls { display: none; }        /* hide keyboard hint on touch */
 }
 .tbtn.act.small { width: 64px; height: 36px; background: var(--dim); font-size: 9px; }
 .tbtn.act.active { background: var(--accent); }
+/* ability button radial cooldown sweep (--cd set from JS) */
+#abilityBtn { background: conic-gradient(var(--p4) var(--cd, 0%), #2a2a44 var(--cd, 0%)); color: #000; }
+#abilityBtn.charged { background: var(--p3); }
+.tbtn.bomb { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }
+.btn-pips { display: flex; gap: 2px; }
+.btn-pips .pip { width: 6px; height: 6px; background: #000; border: 1px solid #000; opacity: .35; }
+.btn-pips .pip.on { background: #fff; opacity: 1; }
+
+/* ---- in-game HUD status strip (desktop + mobile) ---- */
+.hud-strip {
+  display: flex; flex-wrap: wrap; gap: 5px 10px; justify-content: center; align-items: center;
+  width: min(832px, 94vw); font-size: 8px; line-height: 1;
+}
+.hud-item { background: var(--panel); border: 2px solid var(--line); padding: 4px 6px; display: flex; align-items: center; gap: 5px; }
+.hud-item.ability.ready { border-color: var(--p4); color: var(--p4); }
+.hud-item.tags { color: var(--accent); }
+.hud-keys { color: var(--dim); font-size: 8px; }
+.pips { display: inline-flex; gap: 2px; }
+.pip { width: 8px; height: 8px; background: #000; border: 1px solid #555; display: inline-block; }
+.pip.on { background: var(--accent); border-color: var(--accent); }
+
+/* ---- mobile-friendly menus: compress + allow scroll on short screens ---- */
+@media (max-height: 600px) {
+  body { align-items: flex-start; overflow-y: auto; }
+  .logo { font-size: 24px; }
+  .tagline { display: none; }
+  .screen { gap: 8px; padding: 8px 0; }
+  .btn { padding: 9px 12px; font-size: 11px; }
+  .col-sections { max-height: 60vh; }
+}
+@media (max-width: 480px) {
+  .logo { font-size: 30px; }
+  .col-grid { grid-template-columns: 1fr 1fr; }
+  .item-desc { font-size: 6px; }
+  .hud-keys { display: none; }
+}
 
 /* ---- V2: stats line, badges, kit ---- */
 .stats-line { color: var(--dim); font-size: 9px; margin: 2px 0; }

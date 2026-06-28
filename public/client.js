@@ -155,7 +155,7 @@ let roster = [];                 // lobby/scoreboard rows
 let meta = {};                   // slot -> {name,color,level,loadout}
 let balanced = false, hostId = null, houseRules = {}, matchWins = 3;
 let arenaPick = 'dungeon', arenaList = [];
-let arena = 'dungeon', conveyors = {}, teleports = [], iceFloor = false;
+let arena = 'dungeon', conveyors = {}, teleports = [], iceFloor = false, lavaTiles = [];
 let curTheme = null, ambient = [];
 let seenBombs = new Set(), prevPU = new Map(), prevAlive = {}, prevCurse = {};
 
@@ -191,6 +191,7 @@ socket.on('roomState', (st) => {
 socket.on('gameStart', (g) => {
   phase = 'playing'; mapGrid = g.map;
   arena = g.arena || 'dungeon'; conveyors = g.conveyors || {}; teleports = g.teleports || []; iceFloor = !!g.iceFloor;
+  lavaTiles = g.lavaTiles || [];
   setTheme(arena);
   seenBombs = new Set(); prevPU = new Map(); prevAlive = {}; prevCurse = {}; snapshot = null;
   for (const p of g.players) { meta[p.slot] = { name: p.name, color: p.color, level: p.level, loadout: p.loadout }; }
@@ -201,7 +202,39 @@ socket.on('gameStart', (g) => {
   sfx('go');
 });
 
-socket.on('state', (s) => { handleStateSfx(s); snapshot = s; });
+socket.on('state', (s) => { handleStateSfx(s); snapshot = s; updateHudStrip(s); });
+
+// status strip: bomb pips, range, ability cooldown, active effects, + PC keybinds
+function updateHudStrip(s) {
+  const el = $('hudStrip'); if (!el) return;
+  const me = s.players.find(p => p.i === mySlot);
+  if (!me) { el.innerHTML = ''; return; }
+  const m = meta[mySlot];
+  const abName = (m && m.loadout && SHARED.ABILITIES[m.loadout.ability]) ? SHARED.ABILITIES[m.loadout.ability].name : 'ABILITY';
+  const ready = me.cd <= 0;
+  const cdPct = me.cm ? Math.max(0, Math.min(100, Math.round((1 - me.cd / me.cm) * 100))) : 100;
+  const avail = Math.max(0, (me.mb || 0) - (me.ab || 0));
+  let pips = '';
+  for (let i = 0; i < (me.mb || 0); i++) pips += `<span class="pip ${i < avail ? 'on' : ''}"></span>`;
+  const tags = [];
+  if (me.k & 1) tags.push('KICK'); if (me.k & 2) tags.push('THROW'); if (me.k & 4) tags.push('REMOTE'); if (me.k & 8) tags.push('PIERCE');
+  if (me.sh) tags.push('SHIELD'); if (me.ph) tags.push('PHASE'); if (me.cu) tags.push('CURSE:' + String(me.cu).toUpperCase());
+  const keys = document.body.classList.contains('touch') ? '' :
+    '<span class="hud-keys">MOVE WASD/Arrows &middot; BOMB Space &middot; ' + abName + ' E &middot; DETONATE Q</span>';
+  el.innerHTML =
+    `<span class="hud-item">BOMBS <span class="pips">${pips}</span></span>` +
+    `<span class="hud-item">RANGE ${me.rg || 1}</span>` +
+    `<span class="hud-item ability ${ready ? 'ready' : ''}">${abName} ${ready ? '● READY' : cdPct + '%'}</span>` +
+    (tags.length ? `<span class="hud-item tags">${tags.join(' · ')}</span>` : '') +
+    keys;
+  // touch buttons: ability label + cooldown sweep, bomb pips, contextual detonate
+  const ab = $('abilityBtn');
+  if (ab) { ab.style.setProperty('--cd', cdPct + '%'); ab.classList.toggle('charged', ready); ab.firstChild ? (ab.childNodes[0].nodeValue = abName) : (ab.textContent = abName); }
+  const bb = $('bombBtn');
+  if (bb) bb.innerHTML = 'BOMB<span class="btn-pips">' + pips + '</span>';
+  const det = $('detBtn');
+  if (det) { const showDet = (m && m.loadout && m.loadout.bomb === 'remote') || (me.k & 4); det.style.display = showDet ? '' : 'none'; }
+}
 
 socket.on('roundOver', (r) => {
   phase = 'roundover';
@@ -495,6 +528,32 @@ function drawLavaWarn(x, y) {
   ctx.fillStyle = `rgba(252,80,0,${pulse})`; ctx.fillRect(x * TILE + 2, y * TILE + 2, TILE - 4, TILE - 4);
   ctx.strokeStyle = '#fcc800'; ctx.lineWidth = 1; ctx.strokeRect(x * TILE + 3, y * TILE + 3, TILE - 6, TILE - 6);
 }
+// impassable molten terrain (volcano lava channel)
+function drawLavaTile(x, y) {
+  ctx.fillStyle = '#3a0c04'; ctx.fillRect(x * TILE, y * TILE, TILE, TILE);
+  const t = Date.now() / 300;
+  for (let i = 0; i < 4; i++) {
+    const ph = Math.sin(t + (x + y + i) * 1.3);
+    px(x, y, 1 + ((i * 4) % 14), 2 + ((ph + 1) * 6 | 0), 3, 3, ph > 0 ? '#fc6018' : '#e02000');
+  }
+  px(x, y, 0, 0, 16, 1, '#fcc800');
+}
+// hazard telegraph (about to be deadly) — pulsing themed warning
+function drawHazardWarn(x, y) {
+  const blink = Math.floor(Date.now() / 110) % 2 === 0;
+  ctx.fillStyle = blink ? 'rgba(252,200,0,0.30)' : 'rgba(252,200,0,0.12)';
+  ctx.fillRect(x * TILE, y * TILE, TILE, TILE);
+  ctx.strokeStyle = '#fcc800'; ctx.lineWidth = 2;
+  ctx.strokeRect(x * TILE + 2, y * TILE + 2, TILE - 4, TILE - 4);
+  px(x, y, 7, 3, 2, 10, 'rgba(252,200,0,0.5)'); px(x, y, 3, 7, 10, 2, 'rgba(252,200,0,0.5)');
+}
+// hazard active (deadly now) — bright themed strike
+function drawHazardDanger(x, y) {
+  const T = TH();
+  ctx.fillStyle = T.flameEdge; ctx.fillRect(x * TILE, y * TILE, TILE, TILE);
+  px(x, y, 1, 1, 14, 14, T.flameMid);
+  px(x, y, 6, 0, 4, 16, '#ffffff'); px(x, y, 0, 6, 16, 4, '#ffffff');
+}
 function drawCrate(x, y) {
   ctx.fillStyle = PAL.crate; ctx.fillRect(x * TILE, y * TILE, TILE, TILE);
   px(x, y, 1, 1, 14, 2, PAL.crateLit); px(x, y, 1, 1, 2, 14, PAL.crateLit);
@@ -653,8 +712,12 @@ function render() {
   if (!mapGrid) return;
   ctx.fillStyle = TH().bg; ctx.fillRect(0, 0, canvas.width, canvas.height);
   drawBackdrop();
+  const lavaSet = lavaTiles.length ? new Set(lavaTiles) : null;
   for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
-    if (mapGrid[y][x] === 1) { drawWall(x, y); continue; }
+    if (mapGrid[y][x] === 1) {
+      if (lavaSet && lavaSet.has(y * COLS + x)) drawLavaTile(x, y); else drawWall(x, y);
+      continue;
+    }
     drawFloor(x, y);
     if (iceFloor) drawIceSheen(x, y);
     const cdir = conveyors[y * COLS + x];
@@ -663,6 +726,7 @@ function render() {
   for (const t of teleports) drawTeleport(t.x, t.y);
   const s = snapshot;
   if (s) {
+    if (s.warn) for (const idx of s.warn) drawHazardWarn(idx % COLS, (idx / COLS) | 0);
     if (s.lava) for (const idx of s.lava) drawLavaWarn(idx % COLS, (idx / COLS) | 0);
     for (const idx of s.frozen) drawFrozen(idx % COLS, (idx / COLS) | 0);
     for (const idx of s.crates) drawCrate(idx % COLS, (idx / COLS) | 0);
@@ -671,6 +735,7 @@ function render() {
     if (s.decoys) for (const d of s.decoys) drawDecoy(d);
     for (const b of s.bombs) drawBomb(b);
     for (const p of s.players) if (p.a) drawPlayer(p);
+    if (s.danger) for (const idx of s.danger) drawHazardDanger(idx % COLS, (idx / COLS) | 0);
     for (const idx of s.explosions) drawExplosion(idx);
     drawAmbient();
     drawSelfHud();

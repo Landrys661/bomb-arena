@@ -149,6 +149,7 @@ function createRoom(balanced) {
     arena: 'dungeon',
     conveyors: {}, teleports: [], iceFloor: false, volcano: false,
     lavaWarn: [], lavaTimer: 0,
+    lavaTiles: [], hazards: [], warn: [], danger: [],
     map: null,
     bombs: [], explosions: [], powerups: [], frozen: [], tempWalls: [], decoys: [],
     tick: 0, bombId: 1, puId: 1, newBursts: 0,
@@ -299,57 +300,93 @@ function scatterCrates(map, prob, prot) {
     }
 }
 
+// telegraphed cycling hazard over a fixed tile set (lasers / pistons / trapdoors):
+// mostly safe, then `warnDur` ticks of telegraph, then `activeDur` ticks deadly.
+function makeLineHazard(map, kind, idx, cycle, warnDur, activeDur, offset) {
+  const tiles = [];
+  if (kind === 'row') { for (let x = 1; x < COLS - 1; x++) if (map[idx][x] !== WALL) tiles.push(idx * COLS + x); }
+  else { for (let y = 1; y < ROWS - 1; y++) if (map[y][idx] !== WALL) tiles.push(y * COLS + idx); }
+  return { tiles, cycle, warnDur, activeDur, offset };
+}
+
+// Each arena gets a DISTINCT wall-layout generator (not the same pillar grid),
+// its own crate density, signature mechanic, and telegraphed hazards.
 function generateArena(arena, variant) {
   const prot = cornerProtected();
-  const cfg = { map: null, conveyors: {}, teleports: [], iceFloor: false, volcano: false };
+  const cfg = { map: null, conveyors: {}, teleports: [], iceFloor: false, volcano: false, lavaTiles: [], hazards: [] };
+  let map;
 
   if (arena === 'neon') {
-    // open Tron-like layout: no pillar grid, sparse walls, fewer crates
-    const map = blankMap(false);
-    if (variant) { // a central diamond of walls
-      const mx = (COLS - 1) / 2, my = (ROWS - 1) / 2;
-      for (let d = 0; d <= 2; d++) {
-        map[my - d] && (map[my - d][mx] = WALL);
-        map[my + d] && (map[my + d][mx] = WALL);
-      }
-    } else { // a few scattered single pillars
-      for (const [x, y] of [[3, 3], [9, 3], [3, 7], [9, 7], [6, 5]]) map[y][x] = WALL;
+    // Neon Circuit — very open, almost no walls; pulsing laser grids.
+    map = blankMap(false);
+    for (const [x, y] of (variant ? [[6, 2], [6, 8], [2, 5], [10, 5]] : [[3, 3], [9, 3], [3, 7], [9, 7]])) map[y][x] = WALL;
+    scatterCrates(map, 0.22, prot);
+    cfg.hazards.push(makeLineHazard(map, 'row', 3, 96, 20, 16, 0));
+    cfg.hazards.push(makeLineHazard(map, 'row', 7, 96, 20, 16, 48));
+    cfg.hazards.push(makeLineHazard(map, 'col', 6, 120, 22, 16, 30));
+
+  } else if (arena === 'ice') {
+    // Frostbite Lake — sparse pillars, wide open, slippery floor + long sightlines.
+    map = blankMap(false);
+    for (const [x, y] of (variant ? [[4, 4], [8, 4], [4, 6], [8, 6]] : [[6, 2], [2, 6], [10, 6], [6, 8], [6, 5]])) map[y][x] = WALL;
+    scatterCrates(map, 0.34, prot);
+    cfg.iceFloor = true;
+
+  } else if (arena === 'volcano') {
+    // Magma Foundry — asymmetric, split by an impassable lava channel with bridges.
+    map = blankMap(true);
+    const col = variant ? 4 : 8;
+    const bridges = new Set([2, Math.floor(ROWS / 2), ROWS - 3]);
+    for (let y = 1; y < ROWS - 1; y++) {
+      if (bridges.has(y) || prot.has(y * COLS + col)) continue;
+      map[y][col] = WALL; cfg.lavaTiles.push(y * COLS + col);
     }
-    scatterCrates(map, 0.30, prot);
-    cfg.map = map;
-    return cfg;
-  }
+    scatterCrates(map, 0.58, prot);
+    cfg.volcano = true;
 
-  // all other arenas share the classic pillar layout
-  const map = blankMap(true);
-  scatterCrates(map, CRATE_PROB, prot);
-  cfg.map = map;
-
-  if (arena === 'ice') { cfg.iceFloor = true; }
-  else if (arena === 'volcano') { cfg.volcano = true; }
-  else if (arena === 'factory') {
-    // conveyor lanes on a couple of odd rows/cols (which are crate-free corridors)
+  } else if (arena === 'factory') {
+    // Gearworks — conveyor belts thread the grid; piston crushers slam on a beat.
+    map = blankMap(true);
     const lanes = variant
       ? [{ row: 5, dir: 'right' }, { col: 3, dir: 'down' }, { col: 9, dir: 'up' }]
       : [{ row: 3, dir: 'left' }, { row: 7, dir: 'right' }, { col: 6, dir: 'down' }];
     for (const l of lanes) {
-      if (l.row != null) {
-        for (let x = 1; x < COLS - 1; x++) if (map[l.row][x] !== WALL) { map[l.row][x] = EMPTY; cfg.conveyors[l.row * COLS + x] = l.dir; }
-      } else {
-        for (let y = 1; y < ROWS - 1; y++) if (map[y][l.col] !== WALL) { map[y][l.col] = EMPTY; cfg.conveyors[y * COLS + l.col] = l.dir; }
-      }
+      if (l.row != null) { for (let x = 1; x < COLS - 1; x++) if (map[l.row][x] !== WALL) { map[l.row][x] = EMPTY; cfg.conveyors[l.row * COLS + x] = l.dir; } }
+      else { for (let y = 1; y < ROWS - 1; y++) if (map[y][l.col] !== WALL) { map[y][l.col] = EMPTY; cfg.conveyors[y * COLS + l.col] = l.dir; } }
     }
+    scatterCrates(map, 0.58, prot);
+    for (const [x, y] of (variant ? [[5, 3], [7, 7], [9, 5]] : [[3, 5], [5, 7], [9, 3]]))
+      if (map[y][x] !== WALL) { map[y][x] = EMPTY; cfg.hazards.push({ tiles: [y * COLS + x], cycle: 78, warnDur: 16, activeDur: 12, offset: (x * 7 + y * 13) % 78 }); }
+
   } else if (arena === 'manor') {
-    // two teleporter pairs on clear interior tiles
+    // Hollow Manor — partitioned rooms joined by doorways; teleporters + trapdoors.
+    map = blankMap(true);
+    for (let x = 1; x < COLS - 1; x++) if (x % 4 !== 0 && !prot.has(5 * COLS + x)) map[5][x] = WALL;       // h-divider w/ doors
+    for (let y = 1; y < ROWS - 1; y++) if (y % 3 !== 0 && !prot.has(y * COLS + 6)) map[y][6] = WALL;       // v-divider w/ doors
+    map[5][6] = EMPTY;
+    scatterCrates(map, 0.48, prot);
     const pairs = variant
       ? [[[3, 1], [COLS - 4, ROWS - 2]], [[1, ROWS - 4], [COLS - 2, 3]]]
       : [[[5, 1], [7, ROWS - 2]], [[1, 5], [COLS - 2, 5]]];
     for (const [[ax, ay], [bx, by]] of pairs) {
       map[ay][ax] = EMPTY; map[by][bx] = EMPTY;
-      cfg.teleports.push({ x: ax, y: ay, tx: bx, ty: by });
-      cfg.teleports.push({ x: bx, y: by, tx: ax, ty: ay });
+      cfg.teleports.push({ x: ax, y: ay, tx: bx, ty: by }, { x: bx, y: by, tx: ax, ty: ay });
     }
+    for (const [x, y] of (variant ? [[3, 3], [9, 7], [9, 3]] : [[3, 7], [9, 3], [5, 5]]))
+      if (map[y][x] !== WALL) { map[y][x] = EMPTY; cfg.hazards.push({ tiles: [y * COLS + x], cycle: 126, warnDur: 24, activeDur: 20, offset: (x * 5 + y * 9) % 126 }); }
+
+  } else {
+    // Crypt of Echoes (default) — dense pillar maze of tight corridors.
+    map = blankMap(true);
+    for (let y = 1; y < ROWS - 1; y++)
+      for (let x = 1; x < COLS - 1; x++) {
+        if (map[y][x] !== EMPTY || prot.has(y * COLS + x)) continue;
+        if (x % 2 === 1 && y % 2 === 1 && Math.random() < (variant ? 0.18 : 0.12)) map[y][x] = WALL;
+      }
+    scatterCrates(map, 0.72, prot);
   }
+
+  cfg.map = map;
   return cfg;
 }
 function teleportAt(room, x, y) { return room.teleports.find(t => t.x === x && t.y === y); }
@@ -670,6 +707,16 @@ function arenaMechanics(room) {
     const dir = room.conveyors[b.y * COLS + b.x];
     if (dir) { const [dx, dy] = DIRV[dir]; kickBomb(room, b, dx, dy); }
   }
+  // cycling telegraphed hazards (lasers / pistons / trapdoors)
+  room.warn = []; room.danger = [];
+  for (const h of room.hazards) {
+    const t = (room.tick + h.offset) % h.cycle;
+    const activeStart = h.cycle - h.activeDur;
+    const warnStart = activeStart - h.warnDur;
+    if (t >= activeStart) { for (const idx of h.tiles) room.danger.push(idx); }
+    else if (t >= warnStart) { for (const idx of h.tiles) room.warn.push(idx); }
+  }
+
   // volcano: telegraphed lava bursts
   if (room.volcano) {
     for (const w of room.lavaWarn) w.t--;
@@ -742,6 +789,7 @@ function simulate(room) {
   // deaths (shield/armor absorb), with kill attribution
   const flame = new Map();
   for (const e of room.explosions) flame.set(e.y * COLS + e.x, e.owner);
+  for (const idx of room.danger) if (!flame.has(idx)) flame.set(idx, null);   // arena hazards (no kill credit)
   for (const p of room.players.values()) {
     if (!(p.spawned && p.alive)) continue;
     const key = Math.round(p.y) * COLS + Math.round(p.x);
@@ -781,6 +829,7 @@ function startRound(room) {
   room.map = cfg.map;
   room.conveyors = cfg.conveyors; room.teleports = cfg.teleports;
   room.iceFloor = cfg.iceFloor; room.volcano = cfg.volcano;
+  room.lavaTiles = cfg.lavaTiles; room.hazards = cfg.hazards; room.warn = []; room.danger = [];
 
   room.bombs = []; room.explosions = []; room.powerups = [];
   room.frozen = []; room.tempWalls = []; room.decoys = []; room.lavaWarn = [];
@@ -806,6 +855,7 @@ function startRound(room) {
     balanced: room.balanced,
     arena: room.arena,
     conveyors: room.conveyors, teleports: room.teleports, iceFloor: room.iceFloor,
+    lavaTiles: room.lavaTiles,
     players: [...room.players.values()].map(p => ({
       slot: p.slot, name: p.name, color: p.color, x: p.x, y: p.y,
       score: p.matchScore, level: p.level, loadout: p.loadout,
@@ -891,6 +941,8 @@ function broadcastState(room) {
       cu: p.curse && room.tick < p.curse.until ? p.curse.type : 0,
       ph: p.phaseUntil > room.tick ? 1 : 0,
       cd: p.abilityCd, cm: Math.round((SHARED.ABILITIES[p.loadout.ability]?.cd || 1) * TICK_RATE),
+      mb: p.maxBombs, ab: p.activeBombs, rg: p.range,
+      k: (p.canKick ? 1 : 0) | (p.canThrow ? 2 : 0) | (p.bombRemote ? 4 : 0) | (p.bombPierce ? 8 : 0),
     })),
     bombs: room.bombs.map(b => ({ id: b.id, x: b.x, y: b.y, f: b.fuse === Infinity ? -1 : b.fuse, t: b.type, m: b.mine ? (b.armed ? 2 : 1) : 0 })),
     explosions: room.explosions.map(e => e.y * COLS + e.x),
@@ -900,6 +952,8 @@ function broadcastState(room) {
     frozen: room.frozen.map(f => f.y * COLS + f.x),
     decoys: room.decoys.map(d => ({ x: d.x, y: d.y, i: d.slot })),
     lava: room.lavaWarn.map(w => w.y * COLS + w.x),
+    warn: room.warn,
+    danger: room.danger,
   });
 }
 

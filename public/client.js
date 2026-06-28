@@ -158,6 +158,7 @@ let arenaPick = 'dungeon', arenaList = [];
 let arena = 'dungeon', conveyors = {}, teleports = [], iceFloor = false, lavaTiles = [];
 let curTheme = null, ambient = [];
 let seenBombs = new Set(), prevPU = new Map(), prevAlive = {}, prevCurse = {};
+let particles = [], shake = 0, prevCrates = new Set(), prevExpl = new Set();
 
 const $ = id => document.getElementById(id);
 const screens = { landing: $('landing'), settings: $('settings'), collection: $('collection'), lobby: $('lobby'), game: $('game') };
@@ -194,6 +195,7 @@ socket.on('gameStart', (g) => {
   lavaTiles = g.lavaTiles || [];
   setTheme(arena);
   seenBombs = new Set(); prevPU = new Map(); prevAlive = {}; prevCurse = {}; snapshot = null;
+  particles = []; shake = 0; prevCrates = new Set(); prevExpl = new Set();
   for (const p of g.players) { meta[p.slot] = { name: p.name, color: p.color, level: p.level, loadout: p.loadout }; }
   roster = g.players.map(p => ({ slot: p.slot, name: p.name, color: p.color, score: p.score, level: p.level }));
   $('overlay').classList.add('hidden');
@@ -202,7 +204,7 @@ socket.on('gameStart', (g) => {
   sfx('go');
 });
 
-socket.on('state', (s) => { handleStateSfx(s); snapshot = s; updateHudStrip(s); });
+socket.on('state', (s) => { handleStateSfx(s); snapshot = s; updateHudStrip(s); processVfx(s); });
 
 // status strip: bomb pips, range, ability cooldown, active effects, + PC keybinds
 function updateHudStrip(s) {
@@ -265,10 +267,12 @@ function handleStateSfx(s) {
   if (s.nb > 0) sfx('explode');
   const flame = new Set(s.explosions);
   const curPU = new Map(s.powerups.map(p => [p.id, p]));
-  for (const [id, p] of prevPU) if (!curPU.has(id)) { if (!flame.has(p.y * COLS + p.x)) sfx(p.c ? 'curse' : 'pickup'); }
+  for (const [id, p] of prevPU) if (!curPU.has(id)) {
+    if (!flame.has(p.y * COLS + p.x)) { sfx(p.c ? 'curse' : 'pickup'); spawnBurst(p.x * TILE + 16, p.y * TILE + 16, p.c ? '#a020f0' : '#fcfc54', 7, { spd: 1.6, grav: -0.04, life: 18, size: 2 }); }
+  }
   prevPU = curPU;
   for (const pl of s.players) {
-    if (prevAlive[pl.i] === true && !pl.a) sfx('death');
+    if (prevAlive[pl.i] === true && !pl.a) { sfx('death'); spawnBurst(pl.x * TILE + 16, pl.y * TILE + 16, COLORS[pl.i] || '#fff', 16, { spd: 3.2, grav: 0.18, life: 26, size: 3 }); shake = Math.max(shake, 5); }
     if (pl.cu && prevCurse[pl.i] !== pl.cu) sfx('curse');
   }
   prevAlive = {}; prevCurse = {};
@@ -706,11 +710,62 @@ function drawAmbient() {
   }
 }
 
+/* ---- lightweight particle system (shared by all VFX) ---- */
+function spawnBurst(px0, py0, color, n, o) {
+  o = o || {};
+  if (particles.length > 240) return;            // cap for mobile perf
+  const spd = o.spd || 2, grav = o.grav == null ? 0.15 : o.grav, life = o.life || 20, size = o.size || 2;
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2, v = spd * (0.4 + Math.random() * 0.8);
+    particles.push({ x: px0, y: py0, vx: Math.cos(a) * v, vy: Math.sin(a) * v - (o.up || 0), g: grav, life: life * (0.7 + Math.random() * 0.6), max: life, color, size });
+  }
+}
+function updateParticles() {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx; p.y += p.vy; p.vy += p.g; p.life--;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+}
+function drawParticles() {
+  for (const p of particles) {
+    ctx.globalAlpha = Math.max(0, Math.min(1, p.life / p.max));
+    ctx.fillStyle = p.color;
+    ctx.fillRect(p.x | 0, p.y | 0, p.size, p.size);
+  }
+  ctx.globalAlpha = 1;
+}
+// detect explosions (sparks + screen shake) and crate breaks (wood debris)
+function processVfx(s) {
+  const me = s.players.find(p => p.i === mySlot);
+  for (const idx of s.explosions) {
+    if (!prevExpl.has(idx)) {
+      const x = idx % COLS, y = (idx / COLS) | 0;
+      spawnBurst(x * TILE + 16, y * TILE + 16, TH().flameMid, 5, { spd: 3, grav: 0.1, life: 16, size: 3 });
+      spawnBurst(x * TILE + 16, y * TILE + 16, TH().flameCore, 3, { spd: 2, grav: 0.04, life: 12, size: 2 });
+      if (me) { const d = Math.hypot(me.x - x, me.y - y); shake = Math.max(shake, Math.max(2, 8 - d * 1.1)); }
+    }
+  }
+  prevExpl = new Set(s.explosions);
+  const curCrates = new Set(s.crates);
+  for (const idx of prevCrates) if (!curCrates.has(idx)) {
+    const x = idx % COLS, y = (idx / COLS) | 0;
+    spawnBurst(x * TILE + 16, y * TILE + 16, PAL.crate, 8, { spd: 2.4, grav: 0.22, life: 24, size: 3 });
+    spawnBurst(x * TILE + 16, y * TILE + 16, PAL.crateLit, 4, { spd: 2, grav: 0.22, life: 20, size: 2 });
+  }
+  prevCrates = curCrates;
+}
+
 function render() {
   requestAnimationFrame(render);
   if (phase !== 'playing' && phase !== 'roundover' && phase !== 'matchover') return;
   if (!mapGrid) return;
   ctx.fillStyle = TH().bg; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  // screen shake: jitter the whole scene (HUD drawn after restore stays steady)
+  const ox = shake > 0.3 ? (Math.random() * 2 - 1) * shake : 0;
+  const oy = shake > 0.3 ? (Math.random() * 2 - 1) * shake : 0;
+  shake *= 0.85; if (shake < 0.3) shake = 0;
+  ctx.save(); ctx.translate(ox, oy);
   drawBackdrop();
   const lavaSet = lavaTiles.length ? new Set(lavaTiles) : null;
   for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
@@ -738,6 +793,10 @@ function render() {
     if (s.danger) for (const idx of s.danger) drawHazardDanger(idx % COLS, (idx / COLS) | 0);
     for (const idx of s.explosions) drawExplosion(idx);
     drawAmbient();
+  }
+  updateParticles(); drawParticles();    // particles ride the shake transform
+  ctx.restore();                          // end shake (HUD below stays steady)
+  if (s) {
     drawSelfHud();
     const me = s.players.find(p => p.i === mySlot);
     if (phase === 'playing' && me && !me.a) {

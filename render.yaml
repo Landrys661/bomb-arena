@@ -1,0 +1,13 @@
+# Render Blueprint — lets you deploy Bomb Arena with one click.
+# On render.com: New + → Blueprint → connect this repo → Apply.
+services:
+  - type: web
+    name: bomb-arena
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "20"

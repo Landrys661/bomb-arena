@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>BOMB ARENA</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+  <!-- PWA -->
+  <link rel="manifest" href="manifest.webmanifest" />
+  <meta name="theme-color" content="#0b0b16" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+  <meta name="apple-mobile-web-app-title" content="Bomb Arena" />
+  <link rel="apple-touch-icon" href="icon.svg" />
+  <link rel="icon" href="icon.svg" />
+</head>
+<body>
+  <div id="app">
+
+    <!-- ===== LANDING ===== -->
+    <section id="landing" class="screen">
+      <h1 class="logo">BOMB<br />ARENA</h1>
+      <p class="tagline">last blob standing wins</p>
+      <input id="nameInput" class="field" maxlength="10" placeholder="YOUR NAME" autocomplete="off" />
+      <button id="createBtn" class="btn">CREATE ROOM</button>
+      <div class="join-row">
+        <input id="codeInput" class="field code" maxlength="4" placeholder="CODE" autocomplete="off" />
+        <button id="joinBtn" class="btn">JOIN</button>
+      </div>
+      <button id="quickBtn" class="btn btn-accent">QUICK PLAY</button>
+      <button id="loadoutBtn" class="btn btn-dim">LOADOUT &amp; COLLECTION</button>
+      <button id="installBtn" class="btn btn-accent hidden">INSTALL APP</button>
+      <p id="landingStats" class="stats-line"></p>
+      <p id="landingMsg" class="msg"></p>
+    </section>
+
+    <!-- ===== COLLECTION / LOADOUT ===== -->
+    <section id="collection" class="screen hidden">
+      <h2 class="room-title">LOADOUT</h2>
+      <div class="col-header">
+        <span id="colName" class="col-name">PLAYER</span>
+        <span id="colLevel" class="lvbadge">LV 1</span>
+        <span id="colCoins" class="col-coins">◎ 0</span>
+      </div>
+      <div class="xpbar"><div id="colXpFill" class="xpbar-fill"></div></div>
+      <div id="colXpText" class="stats-line">0/100 XP</div>
+      <div id="colSections" class="col-sections"></div>
+      <button id="colBack" class="btn">BACK</button>
+    </section>
+
+    <!-- ===== LOBBY / ROOM ===== -->
+    <section id="lobby" class="screen hidden">
+      <h2 class="room-title">ROOM <span id="roomCode" class="code-chip">----</span></h2>
+      <p id="roomMode" class="stats-line"></p>
+      <p id="matchInfo" class="hint"></p>
+      <ul id="playerList" class="player-list"></ul>
+      <div id="arenaPick" class="house-rules"></div>
+      <div id="houseRules" class="house-rules hidden"></div>
+      <div class="lobby-actions">
+        <button id="readyBtn" class="btn">READY</button>
+        <button id="leaveBtn" class="btn btn-dim">LEAVE</button>
+      </div>
+      <p class="hint">2+ players, all READY → match starts</p>
+      <div id="countdown" class="countdown hidden"></div>
+    </section>
+
+    <!-- ===== GAME ===== -->
+    <section id="game" class="screen hidden">
+      <div id="scoreboard" class="scoreboard"></div>
+      <div id="canvasWrap" class="canvas-wrap">
+        <canvas id="game-canvas" width="416" height="352"></canvas>
+        <div id="overlay" class="overlay hidden"></div>
+      </div>
+      <p class="hint controls">ARROWS/WASD move &nbsp;·&nbsp; SPACE bomb &nbsp;·&nbsp; E ability &nbsp;·&nbsp; Q detonate</p>
+
+      <!-- On-screen controls for touch devices (shown only when body.touch) -->
+      <div id="touch" class="touch-controls">
+        <div class="dpad">
+          <button class="tbtn dir up"    data-dir="up"    aria-label="up"></button>
+          <button class="tbtn dir left"  data-dir="left"  aria-label="left"></button>
+          <button class="tbtn dir right" data-dir="right" aria-label="right"></button>
+          <button class="tbtn dir down"  data-dir="down"  aria-label="down"></button>
+        </div>
+        <div class="action-cluster">
+          <button id="abilityBtn" class="tbtn act" aria-label="ability">ABL</button>
+          <button id="detBtn" class="tbtn act small" aria-label="detonate">DET</button>
+          <button id="bombBtn" class="tbtn bomb" aria-label="bomb">BOMB</button>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- CRT scanline overlay -->
+  <div class="crt"></div>
+
+  <!-- rotate-to-landscape prompt (touch + portrait only) -->
+  <div id="rotate" class="rotate-overlay">
+    <div class="rotate-icon">⟳</div>
+    <div>ROTATE YOUR DEVICE</div>
+    <div class="rotate-sub">Bomb Arena plays best in landscape</div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="shared.js"></script>
+  <script src="client.js"></script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" shape-rendering="crispEdges">
+  <!-- code-drawn pixel icon: bomb + spark on a dark tile (maskable safe zone) -->
+  <rect width="512" height="512" fill="#0b0b16"/>
+  <rect x="48" y="48" width="416" height="416" fill="#161628"/>
+  <!-- bomb body -->
+  <rect x="168" y="208" width="176" height="176" fill="#101018"/>
+  <rect x="144" y="232" width="224" height="128" fill="#101018"/>
+  <rect x="192" y="184" width="128" height="224" fill="#101018"/>
+  <rect x="200" y="232" width="40" height="40" fill="#50506a"/>
+  <!-- fuse + spark -->
+  <rect x="320" y="168" width="24" height="48" fill="#101018"/>
+  <rect x="336" y="120" width="56" height="56" fill="#fcc800"/>
+  <rect x="352" y="136" width="24" height="24" fill="#fcfc54"/>
+  <!-- title bar -->
+  <rect x="96" y="404" width="320" height="40" fill="#fcc800"/>
+  <rect x="112" y="412" width="288" height="24" fill="#e84040"/>
+</svg>

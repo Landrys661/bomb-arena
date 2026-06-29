@@ -2,7 +2,7 @@
  * offline (menus). Network-first for same-origin GETs so the latest build is
  * served when online; falls back to cache when offline. Socket.io traffic and
  * cross-origin requests are left to the network. */
-const CACHE = 'bomb-arena-v2-1';
+const CACHE = 'bomb-arena-v3-2';
 const SHELL = ['./', 'index.html', 'style.css', 'client.js', 'shared.js', 'icon.svg', 'manifest.webmanifest'];
 
 self.addEventListener('install', (e) => {

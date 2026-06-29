@@ -21,36 +21,54 @@
 
 * { box-sizing: border-box; }
 
+html { height: 100%; }
 html, body {
   margin: 0;
-  height: 100%;
   background: var(--bg);
   color: var(--ink);
   font-family: 'Press Start 2P', monospace;
   -webkit-font-smoothing: none;
   image-rendering: pixelated;
+  overscroll-behavior: none;        /* no pull-to-refresh / bounce */
 }
 
 body {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 16px;
-  overflow-x: hidden;
+  /* size to the VISIBLE viewport. JS sets --app-h from visualViewport (most
+     reliable on iOS); dvh is the modern fallback; bare vh is the last resort. */
+  height: 100vh;
+  height: var(--app-h, 100dvh);
+  width: 100%;
+  overflow: hidden;                 /* page never scrolls; screens scroll inside */
+  touch-action: manipulation;       /* kills double-tap zoom (game surface = none) */
 }
 
-#app { width: 100%; max-width: 900px; display: flex; justify-content: center; }
+#app { height: 100%; width: 100%; }
 
 .screen {
+  height: 100%;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 16px;
+  justify-content: safe center;     /* center when it fits, scroll when it doesn't */
+  gap: 14px;
   width: 100%;
-  max-width: 460px;
+  max-width: 480px;
+  margin: 0 auto;
+  padding:
+    calc(10px + env(safe-area-inset-top))
+    calc(10px + env(safe-area-inset-right))
+    calc(12px + env(safe-area-inset-bottom))
+    calc(10px + env(safe-area-inset-left));
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   text-align: center;
 }
 .hidden { display: none !important; }
+
+/* game screen fills the viewport, never page-scrolls; board flexes to fit */
+#game { max-width: 1000px; overflow: hidden; }
+#game .canvas-wrap { flex: 1 1 auto; min-height: 0; width: 100%; display: flex; align-items: center; justify-content: center; }
 
 /* ---- landing ---- */
 .logo {
@@ -168,8 +186,10 @@ body {
 #game-canvas {
   image-rendering: pixelated;
   image-rendering: crisp-edges;
-  width: min(832px, 94vw);
+  width: auto;
   height: auto;
+  max-width: 100%;
+  max-height: 100%;
   aspect-ratio: 416 / 352;
   background: #000;
   border: 4px solid var(--line);
@@ -284,14 +304,12 @@ body.touch .controls { display: none; }        /* hide keyboard hint on touch */
 .pip { width: 8px; height: 8px; background: #000; border: 1px solid #555; display: inline-block; }
 .pip.on { background: var(--accent); border-color: var(--accent); }
 
-/* ---- mobile-friendly menus: compress + allow scroll on short screens ---- */
+/* ---- mobile-friendly menus: compress on short screens (screens scroll inside) ---- */
 @media (max-height: 600px) {
-  body { align-items: flex-start; overflow-y: auto; }
   .logo { font-size: 24px; }
   .tagline { display: none; }
-  .screen { gap: 8px; padding: 8px 0; }
+  .screen { gap: 8px; }
   .btn { padding: 9px 12px; font-size: 11px; }
-  .col-sections { max-height: 60vh; }
 }
 @media (max-width: 480px) {
   .logo { font-size: 30px; }
@@ -316,7 +334,7 @@ body.touch .controls { display: none; }        /* hide keyboard hint on touch */
 .col-coins { color: var(--accent); font-size: 11px; }
 .xpbar { width: 100%; height: 14px; background: #000; border: 3px solid var(--line); }
 .xpbar-fill { height: 100%; background: var(--accent); transition: width .3s; }
-.col-sections { width: 100%; display: flex; flex-direction: column; gap: 12px; max-height: 52vh; overflow-y: auto; padding-right: 4px; }
+.col-sections { width: 100%; display: flex; flex-direction: column; gap: 12px; flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding-right: 4px; }
 .col-section h3 { font-size: 11px; color: var(--accent); margin: 4px 0; text-align: left; }
 .col-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
 .item {
@@ -370,38 +388,50 @@ body.touch .controls { display: none; }        /* hide keyboard hint on touch */
   background: radial-gradient(ellipse at center, rgba(0,0,0,0) 60%, rgba(0,0,0,0.45) 100%);
 }
 
-/* ---- input lock (mobile): no pull-to-refresh / overscroll glow ---- */
-html, body { overscroll-behavior: none; }
-/* native safe-area insets (notches / home indicator) for installed apps */
-body { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
-body.touch .touch-controls { padding-left: calc(10px + env(safe-area-inset-left)); padding-right: calc(10px + env(safe-area-inset-right)); padding-bottom: env(safe-area-inset-bottom); }
+/* ---- input lock (mobile) ---- */
 body.touch { user-select: none; -webkit-user-select: none; }
 body.touch .canvas-wrap, body.touch #game-canvas, body.touch .touch-controls { touch-action: none; }
+body.touch .touch-controls { padding-bottom: env(safe-area-inset-bottom); }
 
-/* ---- rotate-to-landscape overlay (touch + portrait only) ---- */
-.rotate-overlay {
-  display: none;
-  position: fixed; inset: 0; z-index: 10000;
-  background: var(--bg);
-  flex-direction: column; align-items: center; justify-content: center; gap: 14px;
-  text-align: center; padding: 24px; color: var(--ink); font-size: 12px;
+/* ---- non-blocking "landscape" hint (small toast, never intercepts touch) ---- */
+.rotate-overlay { display: none; }
+.rotate-icon, .rotate-sub { display: none; }   /* legacy big-overlay bits, hidden */
+@media (orientation: portrait) and (max-width: 900px) {
+  body.touch .rotate-overlay {
+    display: block;
+    position: fixed;
+    left: 50%;
+    bottom: calc(6px + env(safe-area-inset-bottom));
+    transform: translateX(-50%);
+    z-index: 50;
+    pointer-events: none;                       /* hint can never block the game */
+    background: rgba(11, 11, 22, 0.9);
+    border: 2px solid var(--line);
+    color: var(--dim);
+    font-size: 8px;
+    padding: 5px 9px;
+    white-space: nowrap;
+    border-radius: 2px;
+  }
 }
-.rotate-icon { font-size: 56px; color: var(--accent); animation: spin 2.4s linear infinite; }
-.rotate-sub { font-size: 9px; color: var(--dim); }
-@keyframes spin { to { transform: rotate(360deg); } }
-@media (orientation: portrait) { body.touch .rotate-overlay { display: flex; } }
 
-/* ---- mobile landscape: size the board by height so board + controls fit ---- */
+/* ---- mobile landscape: tighten chrome + flank the board with controls ---- */
 @media (orientation: landscape) and (max-height: 560px) {
-  body { padding: 4px; align-items: flex-start; }
   .screen { gap: 6px; }
-  #game-canvas { width: auto; height: 62vh; max-width: 96vw; }
   .scoreboard { gap: 4px; }
   .score-pill { padding: 3px 6px; font-size: 8px; }
-  .dpad { grid-template-columns: repeat(3, 52px); grid-template-rows: repeat(3, 52px); }
-  .tbtn.bomb { width: 72px; height: 72px; }
-  .tbtn.act { width: 64px; height: 36px; }
-  .controls, .hint { display: none; }
-  /* tuck controls into the bottom corners for thumbs */
-  .touch-controls { position: fixed; left: 0; right: 0; bottom: 6px; padding: 0 10px; }
+  .controls, .hint, .hud-strip { display: none; }   /* reclaim vertical space */
+  .dpad { grid-template-columns: repeat(3, 50px); grid-template-rows: repeat(3, 50px); }
+  .tbtn.bomb { width: 66px; height: 66px; }
+  .tbtn.act { width: 58px; height: 34px; }
+  /* dpad bottom-left, actions bottom-right; gap passes touches through to the board */
+  body.touch .touch-controls {
+    position: fixed; left: 0; right: 0; width: auto;
+    bottom: calc(4px + env(safe-area-inset-bottom));
+    padding: 0 calc(8px + env(safe-area-inset-right)) 0 calc(8px + env(safe-area-inset-left));
+    justify-content: space-between;
+    pointer-events: none;
+  }
+  body.touch .touch-controls .dpad,
+  body.touch .touch-controls .action-cluster { pointer-events: auto; }
 }

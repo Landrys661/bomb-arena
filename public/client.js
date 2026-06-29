@@ -474,8 +474,37 @@ window.addEventListener('keydown', (e) => {
 window.addEventListener('keyup', (e) => { if (isTyping(e)) return; const dir = KEYDIR[e.key.toLowerCase()]; if (dir) releaseDir(dir); });
 
 if (('ontouchstart' in window) || navigator.maxTouchPoints > 0) document.body.classList.add('touch');
-// best-effort landscape lock for installed/native builds (ignored on web)
-try { if (screen.orientation && screen.orientation.lock) screen.orientation.lock('landscape').catch(() => {}); } catch (e) {}
+
+/* ---- viewport sizing: fit the VISIBLE area (fixes iOS 100vh + chrome resize) ---- */
+// One place that updates everything; the canvas + controls re-fit via CSS off --app-h.
+function resizeLayout() {
+  const vv = window.visualViewport;
+  const h = Math.round(vv ? vv.height : window.innerHeight);
+  document.documentElement.style.setProperty('--app-h', h + 'px');
+}
+let _resizeT = null;
+function scheduleResize() { clearTimeout(_resizeT); _resizeT = setTimeout(() => requestAnimationFrame(resizeLayout), 50); }
+resizeLayout();
+window.addEventListener('resize', scheduleResize);
+// iOS reports new dimensions late after rotation — wait a frame/tick before measuring
+window.addEventListener('orientationchange', () => setTimeout(() => requestAnimationFrame(resizeLayout), 120));
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', scheduleResize);
+  window.visualViewport.addEventListener('scroll', scheduleResize);
+}
+const _portraitMM = window.matchMedia('(orientation: portrait)');
+if (_portraitMM.addEventListener) _portraitMM.addEventListener('change', scheduleResize);
+
+// Lock orientation ONLY where it works (installed PWA / native). Never in plain web.
+(function lockOrientationIfSupported() {
+  const standalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  if (standalone && screen.orientation && screen.orientation.lock) {
+    try { screen.orientation.lock('landscape').catch(() => {}); } catch (e) {}
+  }
+})();
+
+// block pinch-zoom (iOS Safari ignores user-scalable=no in some versions)
+document.addEventListener('gesturestart', (e) => e.preventDefault(), { passive: false });
 document.querySelectorAll('#touch .dir').forEach((btn) => {
   const dir = btn.dataset.dir;
   const down = (e) => { e.preventDefault(); ensureAudio(); pressDir(dir); btn.classList.add('active'); };

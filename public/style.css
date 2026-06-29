@@ -388,6 +388,29 @@ body.reduce-motion .logo { text-shadow: 2px 2px 0 #000; }
 .btn { white-space: normal; overflow-wrap: anywhere; line-height: 1.3; }
 .hr-toggle, .item-name, .item-desc { overflow-wrap: anywhere; }
 
+/* ---- animated menu background (drifting characters over starfield) ---- */
+#menuBg { position: fixed; inset: 0; z-index: 0; pointer-events: none; display: block; background: #05060f; }
+#app { position: relative; z-index: 1; }
+
+/* ---- animated title ---- */
+.logo { animation: logo-bob 3.2s ease-in-out infinite, logo-pulse 2.6s ease-in-out infinite; }
+@keyframes logo-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+@keyframes logo-pulse { 0%, 100% { filter: brightness(1); } 50% { filter: brightness(1.18); } }
+body.reduce-motion .logo { animation: none; }
+body.reduce-motion #menuBg { opacity: 0.4; }
+
+/* ---- boot / startup sequence ---- */
+.boot {
+  position: fixed; inset: 0; z-index: 10001; background: #05050a;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px;
+}
+.boot.hidden { display: none; }
+#bootCanvas { image-rendering: pixelated; width: min(70vw, 300px); height: auto; aspect-ratio: 1 / 1; }
+.boot-bar { width: min(70vw, 300px); height: 14px; background: #000; border: 3px solid var(--line); }
+.boot-bar-fill { height: 100%; width: 0%; background: var(--accent); transition: width .12s linear; }
+.boot-ver { color: var(--dim); font-size: 8px; }
+.boot-skip { color: var(--dim); font-size: 8px; opacity: .65; }
+
 /* ---- CRT scanline overlay ---- */
 .crt {
   position: fixed;

@@ -1,17 +1,40 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" shape-rendering="crispEdges">
-  <!-- code-drawn pixel icon: bomb + spark on a dark tile (maskable safe zone) -->
-  <rect width="512" height="512" fill="#0b0b16"/>
-  <rect x="48" y="48" width="416" height="416" fill="#161628"/>
-  <!-- bomb body -->
-  <rect x="168" y="208" width="176" height="176" fill="#101018"/>
-  <rect x="144" y="232" width="224" height="128" fill="#101018"/>
-  <rect x="192" y="184" width="128" height="224" fill="#101018"/>
-  <rect x="200" y="232" width="40" height="40" fill="#50506a"/>
-  <!-- fuse + spark -->
-  <rect x="320" y="168" width="24" height="48" fill="#101018"/>
-  <rect x="336" y="120" width="56" height="56" fill="#fcc800"/>
-  <rect x="352" y="136" width="24" height="24" fill="#fcfc54"/>
-  <!-- title bar -->
-  <rect x="96" y="404" width="320" height="40" fill="#fcc800"/>
-  <rect x="112" y="412" width="288" height="24" fill="#e84040"/>
+  <!-- code-drawn app icon matching the Bomb Arena art: green tiled arena, stone
+       + brick blocks, a black bomb with a lit fuse, and the BOMB ARENA title -->
+  <rect width="512" height="512" rx="64" fill="#0b0b16"/>
+  <rect x="14" y="14" width="484" height="484" rx="52" fill="#0b0b16" stroke="#d8c8a0" stroke-width="14"/>
+  <!-- green tiled floor -->
+  <clipPath id="r"><rect x="34" y="34" width="444" height="444" rx="40"/></clipPath>
+  <g clip-path="url(#r)">
+    <rect x="34" y="34" width="444" height="444" fill="#2f5a3a"/>
+    <g fill="#356a42">
+      <rect x="34" y="34" width="74" height="74"/><rect x="182" y="34" width="74" height="74"/><rect x="330" y="34" width="74" height="74"/>
+      <rect x="108" y="108" width="74" height="74"/><rect x="256" y="108" width="74" height="74"/><rect x="404" y="108" width="74" height="74"/>
+      <rect x="34" y="182" width="74" height="74"/><rect x="330" y="182" width="74" height="74"/>
+      <rect x="108" y="256" width="74" height="74"/><rect x="404" y="256" width="74" height="74"/>
+    </g>
+    <!-- stone blocks -->
+    <g fill="#9aa0a6" stroke="#5a6066" stroke-width="4">
+      <rect x="44" y="60" width="58" height="58"/><rect x="410" y="60" width="58" height="58"/>
+      <rect x="44" y="200" width="58" height="58"/><rect x="410" y="200" width="58" height="58"/>
+      <rect x="170" y="150" width="58" height="58"/><rect x="290" y="150" width="58" height="58"/>
+    </g>
+    <!-- brick blocks -->
+    <g fill="#b5562e">
+      <rect x="120" y="60" width="58" height="58"/><rect x="330" y="60" width="58" height="58"/>
+      <rect x="44" y="270" width="58" height="40"/><rect x="410" y="270" width="58" height="40"/>
+    </g>
+  </g>
+  <!-- bomb -->
+  <circle cx="256" cy="240" r="92" fill="#0d0d12"/>
+  <circle cx="256" cy="240" r="92" fill="none" stroke="#3a3a4a" stroke-width="4"/>
+  <ellipse cx="224" cy="208" rx="26" ry="18" fill="#ffffff" opacity="0.85"/>
+  <rect x="246" y="120" width="20" height="34" fill="#0d0d12"/>
+  <!-- lit fuse spark -->
+  <circle cx="300" cy="108" r="22" fill="#fcc800"/>
+  <circle cx="300" cy="108" r="11" fill="#fcfc54"/>
+  <circle cx="284" cy="120" r="6" fill="#fc6018"/>
+  <!-- title -->
+  <text x="256" y="392" text-anchor="middle" font-family="'Press Start 2P', monospace" font-size="74" font-weight="bold" fill="#f4ecd8" stroke="#000" stroke-width="6" paint-order="stroke">BOMB</text>
+  <text x="256" y="460" text-anchor="middle" font-family="'Press Start 2P', monospace" font-size="66" font-weight="bold" fill="#fc6018" stroke="#000" stroke-width="6" paint-order="stroke">ARENA</text>
 </svg>

@@ -19,6 +19,9 @@
   <link rel="icon" href="icon.svg" />
 </head>
 <body>
+  <!-- Among Us-style drifting-character parallax behind the menus -->
+  <canvas id="menuBg"></canvas>
+
   <div id="app">
 
     <!-- ===== LANDING ===== -->
@@ -151,8 +154,8 @@
           <button class="tbtn dir down"  data-dir="down"  aria-label="down"></button>
         </div>
         <div class="action-cluster">
-          <button id="abilityBtn" class="tbtn act" aria-label="ability">ABL</button>
-          <button id="detBtn" class="tbtn act small" aria-label="detonate">DET</button>
+          <button id="abilityBtn" class="tbtn act" aria-label="ability">ABILITY</button>
+          <button id="detBtn" class="tbtn act small" aria-label="detonate">DETONATE</button>
           <button id="bombBtn" class="tbtn bomb" aria-label="bomb">BOMB</button>
         </div>
       </div>
@@ -162,6 +165,14 @@
 
   <!-- CRT scanline overlay -->
   <div class="crt"></div>
+
+  <!-- boot / startup sequence (canvas-drawn; skippable; respects reduced motion) -->
+  <div id="boot" class="boot">
+    <canvas id="bootCanvas" width="360" height="360"></canvas>
+    <div class="boot-bar"><div id="bootFill" class="boot-bar-fill"></div></div>
+    <div id="bootVer" class="boot-ver"></div>
+    <div class="boot-skip">tap to skip</div>
+  </div>
 
   <!-- small, non-blocking landscape hint (portrait + small touch only) -->
   <div id="rotate" class="rotate-overlay">↻ rotate for more room</div>

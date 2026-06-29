@@ -164,7 +164,11 @@ let particles = [], shake = 0, prevCrates = new Set(), prevExpl = new Set();
 
 const $ = id => document.getElementById(id);
 const screens = { landing: $('landing'), auth: $('auth'), leaderboard: $('leaderboard'), settings: $('settings'), collection: $('collection'), lobby: $('lobby'), game: $('game') };
-function showScreen(name) { for (const k in screens) screens[k].classList.toggle('hidden', k !== name); }
+let menuBgActive = true;   // drifting-character background pauses during a match
+function showScreen(name) {
+  for (const k in screens) screens[k].classList.toggle('hidden', k !== name);
+  menuBgActive = (name !== 'game');
+}
 
 socket.on('connect', () => { myId = socket.id; });
 socket.on('errorMsg', ({ message }) => { $('landingMsg').textContent = message || 'ERROR'; });
@@ -1044,3 +1048,100 @@ function showMatchOverlay(m, mine, info) {
   html += `<div class="sub" style="color:var(--dim)">returning to lobby...</div>`;
   ov.innerHTML = html;
 }
+
+/* ==========================================================================
+ * Boot sequence + Among Us-style animated menu background  (asset-free)
+ * ======================================================================== */
+const APP_VERSION = 'v4.1';
+
+(function bootSequence() {
+  const boot = $('boot'); if (!boot) return;
+  const verEl = $('bootVer'); if (verEl) verEl.textContent = APP_VERSION;
+  const reduce = !!(settings && settings.reduce);
+  const c = $('bootCanvas'), bx = c.getContext('2d'); bx.imageSmoothingEnabled = false;
+  let done = false;
+  function finish() { if (done) return; done = true; boot.classList.add('hidden'); }
+  boot.addEventListener('pointerdown', finish);
+  const t0 = performance.now();
+  const DUR = reduce ? 600 : 2400;
+  function frame(now) {
+    const e = Math.min(1, (now - t0) / DUR);
+    const fill = $('bootFill'); if (fill) fill.style.width = Math.round(e * 100) + '%';
+    bx.fillStyle = '#05050a'; bx.fillRect(0, 0, 360, 360);
+    if (!reduce && Math.random() < 0.06) { bx.fillStyle = 'rgba(255,255,255,0.05)'; bx.fillRect(0, 0, 360, 360); }
+    bx.fillStyle = '#0d0d12'; bx.beginPath(); bx.arc(180, 175, 70, 0, 7); bx.fill();
+    bx.fillStyle = 'rgba(255,255,255,0.8)'; bx.beginPath(); bx.arc(158, 153, 15, 0, 7); bx.fill();
+    bx.fillStyle = '#0d0d12'; bx.fillRect(192, 101, 14, 30);
+    const sp = 8 + e * 14 + (reduce ? 0 : Math.sin(now / 60) * 3);
+    bx.fillStyle = '#fcc800'; bx.beginPath(); bx.arc(214, 96, sp, 0, 7); bx.fill();
+    bx.fillStyle = '#fcfc54'; bx.beginPath(); bx.arc(214, 96, sp * 0.5, 0, 7); bx.fill();
+    const ta = Math.max(0, (e - 0.4) / 0.6);
+    bx.globalAlpha = ta; bx.textAlign = 'center';
+    bx.fillStyle = '#f4ecd8'; bx.font = 'bold 40px "Press Start 2P", monospace'; bx.fillText('BOMB', 180, 292);
+    bx.fillStyle = '#fc6018'; bx.font = 'bold 34px "Press Start 2P", monospace'; bx.fillText('ARENA', 180, 330);
+    bx.globalAlpha = 1;
+    if (e >= 1) { finish(); return; }
+    if (!done) requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+  setTimeout(finish, DUR + 2000);   // safety: never block forever
+})();
+
+(function menuBgInit() {
+  const c = $('menuBg'); if (!c) return; const mx = c.getContext('2d');
+  const DPR = () => Math.min(window.devicePixelRatio || 1, 2);
+  let W = 0, H = 0, stars = [], movers = [], raf = null, rt = null;
+  function newMover(anywhere) {
+    const depth = 0.5 + Math.random(), d = DPR();
+    const size = (22 + Math.random() * 26) * depth * d, fromLeft = Math.random() < 0.5;
+    return {
+      bomb: Math.random() < 0.3, color: COLORS[(Math.random() * COLORS.length) | 0],
+      x: anywhere ? Math.random() * W : (fromLeft ? -size : W + size),
+      y: Math.random() * H, vx: (0.2 + Math.random() * 0.5) * depth * d * (fromLeft ? 1 : -1),
+      vy: (Math.random() - 0.5) * 0.2 * d, rot: Math.random() * 7, vr: (Math.random() - 0.5) * 0.01, size,
+    };
+  }
+  function build() {
+    const d = DPR(); stars = [];
+    for (const L of [{ n: 60, v: 0.04, s: 1 }, { n: 40, v: 0.09, s: 2 }, { n: 20, v: 0.16, s: 3 }])
+      for (let i = 0; i < L.n; i++) stars.push({ x: Math.random() * W, y: Math.random() * H, s: L.s * d, v: L.v * d });
+    movers = []; const count = window.innerWidth < 600 ? 5 : 9;
+    for (let i = 0; i < count; i++) movers.push(newMover(true));
+  }
+  function resize() {
+    W = c.width = Math.floor(window.innerWidth * DPR()); H = c.height = Math.floor(window.innerHeight * DPR());
+    c.style.width = window.innerWidth + 'px'; c.style.height = window.innerHeight + 'px'; build();
+  }
+  function blob(x, y, s, color, rot) {
+    mx.save(); mx.translate(x, y); mx.rotate(rot);
+    mx.fillStyle = '#000'; mx.fillRect(-s / 2 - 2, -s / 2 - 2, s + 4, s + 4);
+    mx.fillStyle = color; mx.fillRect(-s / 2, -s / 2, s, s); mx.fillRect(-s / 2 + s * 0.18, -s / 2 - s * 0.12, s * 0.64, s * 0.14);
+    mx.fillStyle = '#fff'; mx.fillRect(-s * 0.22, -s * 0.12, s * 0.16, s * 0.2); mx.fillRect(s * 0.06, -s * 0.12, s * 0.16, s * 0.2);
+    mx.fillStyle = '#000'; mx.fillRect(-s * 0.18, -s * 0.06, s * 0.08, s * 0.1); mx.fillRect(s * 0.10, -s * 0.06, s * 0.08, s * 0.1);
+    mx.restore();
+  }
+  function bomb(x, y, s, rot) {
+    mx.save(); mx.translate(x, y); mx.rotate(rot);
+    mx.fillStyle = '#0d0d12'; mx.beginPath(); mx.arc(0, 0, s / 2, 0, 7); mx.fill();
+    mx.fillStyle = 'rgba(255,255,255,0.7)'; mx.beginPath(); mx.arc(-s * 0.16, -s * 0.16, s * 0.1, 0, 7); mx.fill();
+    mx.fillStyle = '#fcc800'; mx.fillRect(s * 0.18, -s * 0.52, s * 0.1, s * 0.2); mx.restore();
+  }
+  function loop() {
+    raf = requestAnimationFrame(loop);
+    if (!menuBgActive) return;
+    mx.fillStyle = '#05060f'; mx.fillRect(0, 0, W, H);
+    const g = mx.createRadialGradient(W * 0.72, H * 0.28, 0, W * 0.72, H * 0.28, Math.max(W, H) * 0.55);
+    g.addColorStop(0, 'rgba(64,42,114,0.28)'); g.addColorStop(1, 'rgba(5,6,15,0)');
+    mx.fillStyle = g; mx.fillRect(0, 0, W, H);
+    for (const st of stars) { st.x -= st.v; if (st.x < 0) { st.x = W; st.y = Math.random() * H; } mx.fillStyle = 'rgba(255,255,255,' + (0.3 + st.v) + ')'; mx.fillRect(st.x | 0, st.y | 0, st.s, st.s); }
+    if (!(settings && settings.reduce)) {
+      for (const m of movers) {
+        m.x += m.vx; m.y += m.vy; m.rot += m.vr;
+        if (m.x < -100 || m.x > W + 100 || m.y < -100 || m.y > H + 100) Object.assign(m, newMover(false));
+        m.bomb ? bomb(m.x, m.y, m.size, m.rot) : blob(m.x, m.y, m.size, m.color, m.rot);
+      }
+    }
+  }
+  window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(resize, 150); });
+  resize(); loop();
+})();

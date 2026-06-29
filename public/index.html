@@ -25,23 +25,75 @@
     <section id="landing" class="screen">
       <h1 class="logo">BOMB<br />ARENA</h1>
       <p class="tagline">last blob standing wins</p>
+      <button id="acctBar" class="acct-bar">GUEST &middot; tap to log in / sign up</button>
       <input id="nameInput" class="field" maxlength="10" placeholder="YOUR NAME" autocomplete="off" />
+      <button id="quickBtn" class="btn btn-accent">QUICK PLAY</button>
+      <button id="rankedBtn" class="btn">RANKED 1V1</button>
       <button id="createBtn" class="btn">CREATE ROOM</button>
       <div class="join-row">
         <input id="codeInput" class="field code" maxlength="4" placeholder="CODE" autocomplete="off" />
         <button id="joinBtn" class="btn">JOIN</button>
       </div>
-      <button id="quickBtn" class="btn btn-accent">QUICK PLAY</button>
       <button id="loadoutBtn" class="btn btn-dim">LOADOUT &amp; COLLECTION</button>
+      <button id="leaderboardBtn" class="btn btn-dim">LEADERBOARD</button>
       <button id="settingsBtn" class="btn btn-dim">SETTINGS</button>
       <button id="installBtn" class="btn btn-accent hidden">INSTALL APP</button>
       <p id="landingStats" class="stats-line"></p>
       <p id="landingMsg" class="msg"></p>
     </section>
 
+    <!-- ===== AUTH (login / register) ===== -->
+    <section id="auth" class="screen hidden">
+      <h2 class="room-title">ACCOUNT</h2>
+      <p class="stats-line">Log in to save your progress across devices &amp; play Ranked.</p>
+      <input id="authUser" class="field" maxlength="16" placeholder="USERNAME" autocomplete="username" />
+      <input id="authPass" class="field" type="password" maxlength="100" placeholder="PASSWORD" autocomplete="current-password" />
+      <button id="authLoginBtn" class="btn btn-accent">LOG IN</button>
+      <button id="authRegisterBtn" class="btn">CREATE ACCOUNT</button>
+      <button id="authGuestBtn" class="btn btn-dim">PLAY AS GUEST</button>
+      <p id="authMsg" class="msg"></p>
+    </section>
+
+    <!-- ===== LEADERBOARD ===== -->
+    <section id="leaderboard" class="screen hidden">
+      <h2 class="room-title">LEADERBOARD</h2>
+      <p class="stats-line">Top players by ranked MMR</p>
+      <ol id="lbList" class="lb-list"></ol>
+      <button id="lbBack" class="btn btn-dim">BACK</button>
+    </section>
+
     <!-- ===== SETTINGS ===== -->
     <section id="settings" class="screen hidden">
       <h2 class="room-title">SETTINGS</h2>
+
+      <div class="set-section">
+        <h3>ACCOUNT</h3>
+        <p id="setAccount" class="stats-line"></p>
+        <div id="setAcctButtons"></div>
+        <div id="setChangePw" class="hidden">
+          <input id="pwOld" class="field" type="password" maxlength="100" placeholder="CURRENT PASSWORD" />
+          <input id="pwNew" class="field" type="password" maxlength="100" placeholder="NEW PASSWORD" />
+          <button id="pwSaveBtn" class="btn">SAVE PASSWORD</button>
+        </div>
+      </div>
+
+      <div class="set-section">
+        <h3>AUDIO</h3>
+        <label class="set-row">MASTER <input id="setVolMaster" class="set-range" type="range" min="0" max="100"></label>
+        <label class="set-row">SFX <input id="setVolSfx" class="set-range" type="range" min="0" max="100"></label>
+        <label class="set-row"><input id="setMute" type="checkbox"> MUTE</label>
+      </div>
+
+      <div class="set-section">
+        <h3>GRAPHICS &amp; ACCESSIBILITY</h3>
+        <label class="set-row"><input id="setShake" type="checkbox"> SCREEN SHAKE</label>
+        <label class="set-row"><input id="setReduce" type="checkbox"> REDUCE FLASHING / MOTION</label>
+        <label class="set-row"><input id="setCrt" type="checkbox"> CRT SCANLINES</label>
+        <label class="set-row">PARTICLES
+          <select id="setParticles" class="set-select"><option value="high">HIGH</option><option value="med">MEDIUM</option><option value="low">LOW</option></select>
+        </label>
+      </div>
+
       <p class="stats-line">SERVER URL — where matches are hosted. Leave blank on the web to use this site; the installed apps use this to find your server.</p>
       <input id="serverInput" class="field" placeholder="https://your-server.onrender.com" autocomplete="off" />
       <p id="serverStatus" class="stats-line"></p>

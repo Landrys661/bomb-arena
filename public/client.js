@@ -67,12 +67,14 @@ function ensureAudio() {
   if (actx && actx.state === 'suspended') actx.resume();
 }
 function note(freq, start, dur, vol, type) {
+  const g = vol * (typeof sfxGain !== 'undefined' ? sfxGain : 0.7);
+  if (g <= 0) return;                       // muted
   const t0 = actx.currentTime + start;
   const osc = actx.createOscillator(), gain = actx.createGain();
   osc.type = type || 'square';
   osc.frequency.setValueAtTime(freq, t0);
   gain.gain.setValueAtTime(0.0001, t0);
-  gain.gain.exponentialRampToValueAtTime(vol, t0 + 0.005);
+  gain.gain.exponentialRampToValueAtTime(g, t0 + 0.005);
   gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
   osc.connect(gain).connect(actx.destination);
   osc.start(t0); osc.stop(t0 + dur + 0.02);
@@ -119,7 +121,7 @@ function loadProfile() {
     });
   } catch (e) { return defaultProfile(); }
 }
-function saveProfile() { try { localStorage.setItem(PKEY, JSON.stringify(profile)); } catch (e) {} }
+function saveProfile() { try { localStorage.setItem(PKEY, JSON.stringify(profile)); } catch (e) {} if (typeof account !== 'undefined' && account) pushProfile(); }
 function myLevel() { return SHARED.levelFromXp(profile.xp).level; }
 const CAT_TABLE = { bomb: 'BOMB_TYPES', ability: 'ABILITIES', cls: 'CLASSES', hat: 'COSMETICS' };
 function isUnlocked(cat, id) {
@@ -191,6 +193,7 @@ socket.on('roomState', (st) => {
 
 socket.on('gameStart', (g) => {
   phase = 'playing'; mapGrid = g.map;
+  if (typeof hideRankedOverlay === 'function') hideRankedOverlay();
   arena = g.arena || 'dungeon'; conveyors = g.conveyors || {}; teleports = g.teleports || []; iceFloor = !!g.iceFloor;
   lavaTiles = g.lavaTiles || [];
   setTheme(arena);
@@ -254,10 +257,19 @@ socket.on('roundOver', (r) => {
 socket.on('matchOver', (m) => {
   phase = 'matchover';
   const mine = m.results.find(r => r.slot === mySlot);
-  const info = mine ? addRewards(mine) : null;
+  let info = null;
+  if (mine) {
+    if (account) {
+      // server already persisted; pull fresh totals, show gains + ranked delta
+      info = { gainedXp: mine.xp, gainedCoins: mine.coins, newly: [], serverSaved: true, mmrDelta: mine.mmrDelta, ranked: m.ranked };
+      hydrateAccount();
+    } else {
+      info = addRewards(mine);
+    }
+  }
   showMatchOverlay(m, mine, info);
   sfx(m.winnerId === myId ? 'win' : 'death');
-  if (info && (info.after > info.before)) setTimeout(() => sfx('levelup'), 400);
+  if (info && info.after > info.before) setTimeout(() => sfx('levelup'), 400);
 });
 
 function handleStateSfx(s) {
@@ -272,7 +284,7 @@ function handleStateSfx(s) {
   }
   prevPU = curPU;
   for (const pl of s.players) {
-    if (prevAlive[pl.i] === true && !pl.a) { sfx('death'); spawnBurst(pl.x * TILE + 16, pl.y * TILE + 16, COLORS[pl.i] || '#fff', 16, { spd: 3.2, grav: 0.18, life: 26, size: 3 }); shake = Math.max(shake, 5); }
+    if (prevAlive[pl.i] === true && !pl.a) { sfx('death'); spawnBurst(pl.x * TILE + 16, pl.y * TILE + 16, COLORS[pl.i] || '#fff', 16, { spd: 3.2, grav: 0.18, life: 26, size: 3 }); if (settings.shake) shake = Math.max(shake, 5); }
     if (pl.cu && prevCurse[pl.i] !== pl.cu) sfx('curse');
   }
   prevAlive = {}; prevCurse = {};
@@ -385,7 +397,7 @@ function renderScoreboard() {
 /* ---- buttons ---- */
 function nameVal() { const n = $('nameInput').value.trim(); return n || 'PLAYER'; }
 function saveName() { profile.name = nameVal(); saveProfile(); }
-function joinPayload(extra) { return Object.assign({ name: nameVal(), loadout: profile.loadout, level: myLevel() }, extra); }
+function joinPayload(extra) { return Object.assign({ name: nameVal(), loadout: profile.loadout, level: myLevel(), token: authToken }, extra); }
 $('nameInput').value = profile.name || '';
 $('createBtn').onclick = () => { ensureAudio(); saveName(); socket.emit('joinRoom', joinPayload({ roomCode: null })); };
 $('joinBtn').onclick = () => {
@@ -415,6 +427,7 @@ function openSettings() {
   let saved = ''; try { saved = localStorage.getItem('bombArenaServer') || ''; } catch (e) {}
   $('serverInput').value = saved;
   updateServerStatus();
+  if (typeof renderSettings === 'function') renderSettings();
 }
 if ($('settingsBtn')) $('settingsBtn').onclick = openSettings;
 if ($('settingsBack')) $('settingsBack').onclick = () => showScreen('landing');
@@ -426,6 +439,167 @@ if ($('serverSave')) $('serverSave').onclick = () => {
 if ($('serverReset')) $('serverReset').onclick = () => { try { localStorage.removeItem('bombArenaServer'); } catch (e) {} location.reload(); };
 socket.on('connect', updateServerStatus);
 socket.on('disconnect', updateServerStatus);
+
+/* ==========================================================================
+ * V4: settings, accounts, ranked, leaderboard
+ * ======================================================================== */
+
+/* ---- settings (localStorage; applied live) ---- */
+const SKEY = 'bombArenaSettings';
+const defaultSettings = () => ({ volMaster: 80, volSfx: 80, mute: false, shake: true, reduce: false, crt: true, particles: 'high' });
+let settings = (() => { try { return Object.assign(defaultSettings(), JSON.parse(localStorage.getItem(SKEY)) || {}); } catch (e) { return defaultSettings(); } })();
+let sfxGain = 0.64;
+function applySettings() {
+  sfxGain = settings.mute ? 0 : (settings.volMaster / 100) * (settings.volSfx / 100);
+  const crt = document.querySelector('.crt'); if (crt) crt.style.display = settings.crt ? '' : 'none';
+  document.body.classList.toggle('reduce-motion', !!settings.reduce);
+}
+function saveSettings() { try { localStorage.setItem(SKEY, JSON.stringify(settings)); } catch (e) {} applySettings(); }
+function particleScale() { return settings.particles === 'low' ? 0.3 : settings.particles === 'med' ? 0.6 : 1; }
+applySettings();
+
+/* ---- account / auth ---- */
+let authToken = null; try { authToken = localStorage.getItem('bombArenaToken') || null; } catch (e) {}
+let account = null;   // {username, mmr, ranked_w, ranked_l, level, profile}
+function api(path, opts) {
+  opts = opts || {};
+  opts.headers = Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {}, authToken ? { Authorization: 'Bearer ' + authToken } : {});
+  return fetch((SERVER_URL || '') + path, opts);
+}
+function serverToProfile(sp, username) {
+  const d = defaultProfile();
+  const p = Object.assign(d, sp || {});
+  p.loadout = SHARED.sanitizeLoadout(p.loadout);
+  p.name = username;
+  return p;
+}
+function setAccount(acc, token) {
+  account = acc;
+  if (token) { authToken = token; try { localStorage.setItem('bombArenaToken', token); } catch (e) {} }
+  if (acc) { profile = serverToProfile(acc.profile, acc.username); if ($('nameInput')) $('nameInput').value = acc.username; }
+  renderAcct(); refreshLanding();
+}
+async function hydrateAccount() {
+  if (!authToken) { renderAcct(); return; }
+  try {
+    const r = await api('/api/me');
+    if (r.ok) { setAccount((await r.json()).account); }
+    else { authToken = null; try { localStorage.removeItem('bombArenaToken'); } catch (e) {} renderAcct(); }
+  } catch (e) { renderAcct(); }
+}
+async function authSubmit(path) {
+  const username = $('authUser').value.trim(), password = $('authPass').value;
+  try {
+    const r = await api(path, { method: 'POST', body: JSON.stringify({ username, password }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { $('authMsg').textContent = j.error || 'Error'; return; }
+    setAccount(j.account, j.token);
+    $('authMsg').textContent = ''; $('authPass').value = '';
+    showScreen('landing');
+  } catch (e) { $('authMsg').textContent = 'Network error.'; }
+}
+async function logout() {
+  try { await api('/api/logout', { method: 'POST', body: '{}' }); } catch (e) {}
+  authToken = null; try { localStorage.removeItem('bombArenaToken'); } catch (e) {}
+  account = null; profile = loadProfile();
+  renderAcct(); refreshLanding(); renderSettings();
+}
+let _pushT = null;
+function pushProfile() {
+  if (!account) return;
+  clearTimeout(_pushT);
+  _pushT = setTimeout(async () => {
+    try { const r = await api('/api/profile', { method: 'POST', body: JSON.stringify({ profile: { loadout: profile.loadout, unlocks: profile.unlocks } }) }); if (r.ok) account = (await r.json()).account; } catch (e) {}
+  }, 300);
+}
+function acctTier() { return account ? SHARED.rankTier(account.mmr) : null; }
+function renderAcct() {
+  const bar = $('acctBar'); if (!bar) return;
+  if (account) { const t = acctTier(); bar.innerHTML = `${account.username} &middot; LV ${account.level} &middot; <span style="color:${t.color}">${t.name}</span> ${account.mmr}`; }
+  else bar.textContent = 'GUEST · tap to log in / sign up';
+}
+if ($('acctBar')) $('acctBar').onclick = () => { ensureAudio(); account ? openSettings() : showScreen('auth'); };
+if ($('authLoginBtn')) $('authLoginBtn').onclick = () => authSubmit('/api/login');
+if ($('authRegisterBtn')) $('authRegisterBtn').onclick = () => authSubmit('/api/register');
+if ($('authGuestBtn')) $('authGuestBtn').onclick = () => { showScreen('landing'); };
+
+/* ---- settings screen render + wiring ---- */
+function renderSettings() {
+  if ($('setAccount')) {
+    if (account) {
+      const t = acctTier();
+      $('setAccount').innerHTML = `${account.username} · LV ${account.level} · <span style="color:${t.color}">${t.name}</span> (${account.mmr} MMR) · ${account.ranked_w}W/${account.ranked_l}L`;
+      $('setAcctButtons').innerHTML = '<button id="logoutBtn" class="btn">LOG OUT</button><button id="cpwToggle" class="btn btn-dim">CHANGE PASSWORD</button>';
+      $('logoutBtn').onclick = logout;
+      $('cpwToggle').onclick = () => $('setChangePw').classList.toggle('hidden');
+    } else {
+      $('setAccount').textContent = 'Playing as guest — progress saved on this device only.';
+      $('setAcctButtons').innerHTML = '<button id="goAuth" class="btn btn-accent">LOG IN / SIGN UP</button>';
+      $('goAuth').onclick = () => showScreen('auth');
+      $('setChangePw').classList.add('hidden');
+    }
+  }
+  if ($('setVolMaster')) {
+    $('setVolMaster').value = settings.volMaster; $('setVolSfx').value = settings.volSfx; $('setMute').checked = settings.mute;
+    $('setShake').checked = settings.shake; $('setReduce').checked = settings.reduce; $('setCrt').checked = settings.crt; $('setParticles').value = settings.particles;
+  }
+}
+function bindSetting(id, ev, fn) { const el = $(id); if (el) el[ev] = (e) => { fn(e.target); saveSettings(); }; }
+bindSetting('setVolMaster', 'oninput', t => settings.volMaster = +t.value);
+bindSetting('setVolSfx', 'oninput', t => settings.volSfx = +t.value);
+bindSetting('setMute', 'onchange', t => settings.mute = t.checked);
+bindSetting('setShake', 'onchange', t => settings.shake = t.checked);
+bindSetting('setReduce', 'onchange', t => settings.reduce = t.checked);
+bindSetting('setCrt', 'onchange', t => settings.crt = t.checked);
+bindSetting('setParticles', 'onchange', t => settings.particles = t.value);
+if ($('pwSaveBtn')) $('pwSaveBtn').onclick = async () => {
+  try {
+    const r = await api('/api/change-password', { method: 'POST', body: JSON.stringify({ oldPassword: $('pwOld').value, newPassword: $('pwNew').value }) });
+    const j = await r.json().catch(() => ({}));
+    $('serverStatus') && ($('serverStatus').textContent = r.ok ? 'Password changed.' : (j.error || 'Error'));
+    if (r.ok) { $('pwOld').value = ''; $('pwNew').value = ''; $('setChangePw').classList.add('hidden'); }
+  } catch (e) {}
+};
+
+/* ---- ranked queue ---- */
+let rankedSearching = false;
+function showRankedOverlay(size) {
+  let o = $('rankedOverlay');
+  if (!o) { o = document.createElement('div'); o.id = 'rankedOverlay'; document.body.appendChild(o); }
+  o.style.cssText = 'display:flex;position:fixed;inset:0;z-index:9000;background:rgba(8,8,18,.93);flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;padding:16px;';
+  o.innerHTML = '<div class="big" style="color:var(--accent)">RANKED 1V1</div><div class="sub">searching for opponent…</div>' +
+    (size ? `<div class="sub" style="color:var(--dim)">in queue: ${size}</div>` : '') + '<button id="rankedCancel" class="btn btn-dim">CANCEL</button>';
+  $('rankedCancel').onclick = () => { socket.emit('cancelRanked'); hideRankedOverlay(); };
+}
+function hideRankedOverlay() { const o = $('rankedOverlay'); if (o) o.style.display = 'none'; rankedSearching = false; }
+function startRankedQueue() {
+  if (!account) { $('authMsg').textContent = 'Log in to play Ranked.'; showScreen('auth'); return; }
+  ensureAudio(); rankedSearching = true; socket.emit('rankedQueue', { token: authToken }); showRankedOverlay();
+}
+socket.on('rankedStatus', (s) => { if (s && s.queued) showRankedOverlay(s.size); else hideRankedOverlay(); });
+if ($('rankedBtn')) $('rankedBtn').onclick = startRankedQueue;
+
+/* ---- leaderboard ---- */
+async function openLeaderboard() {
+  showScreen('leaderboard');
+  const ol = $('lbList'); ol.innerHTML = '<li>loading…</li>';
+  try {
+    const j = await (await api('/api/leaderboard')).json();
+    ol.innerHTML = '';
+    for (const e of j.leaderboard) {
+      const t = SHARED.rankTier(e.mmr);
+      const li = document.createElement('li');
+      li.innerHTML = `<span class="lb-rank">#${e.rank}</span><span class="lb-name">${e.username}</span><span class="lb-tier" style="color:${t.color}">${t.name}</span><span class="lb-mmr">${e.mmr}</span>`;
+      ol.appendChild(li);
+    }
+    if (!j.leaderboard.length) ol.innerHTML = '<li class="lb-empty">No ranked players yet — play Ranked to appear here.</li>';
+  } catch (e) { ol.innerHTML = '<li class="lb-empty">Could not load (server offline?).</li>'; }
+}
+if ($('leaderboardBtn')) $('leaderboardBtn').onclick = openLeaderboard;
+if ($('lbBack')) $('lbBack').onclick = () => showScreen('landing');
+
+// boot: hydrate account (auto-login) if a token is stored
+hydrateAccount();
 
 let isReady = false;
 $('readyBtn').onclick = () => {
@@ -629,7 +803,7 @@ function drawExplosion(idx) {
   const x = idx % COLS, y = (idx / COLS) | 0;
   ctx.fillStyle = T.flameEdge; ctx.fillRect(x * TILE, y * TILE, TILE, TILE);
   px(x, y, 1, 1, 14, 14, T.flameMid); px(x, y, 3, 3, 10, 10, T.flameCore);
-  if (Math.random() < 0.5) px(x, y, 6, 6, 4, 4, '#ffffff');
+  if (!settings.reduce && Math.random() < 0.5) px(x, y, 6, 6, 4, 4, '#ffffff');
 }
 const PU_STYLE = {
   bomb: ['#e84040', 'B'], range: ['#fc9838', 'R'], speed: ['#fcc800', 'S'],
@@ -727,6 +901,7 @@ function drawBackdrop() {
   }
 }
 function drawAmbient() {
+  if (settings.reduce) return;                 // reduced-motion: no drifting particles
   const T = TH(); const kind = T.ambient;
   if (kind === 'snow' || kind === 'fog') {
     ctx.fillStyle = kind === 'fog' ? 'rgba(160,120,200,0.35)' : 'rgba(220,240,255,0.8)';
@@ -742,7 +917,9 @@ function drawAmbient() {
 /* ---- lightweight particle system (shared by all VFX) ---- */
 function spawnBurst(px0, py0, color, n, o) {
   o = o || {};
-  if (particles.length > 240) return;            // cap for mobile perf
+  n = Math.max(1, Math.round(n * (typeof particleScale === 'function' ? particleScale() : 1)));
+  const cap = settings && settings.particles === 'low' ? 90 : settings && settings.particles === 'med' ? 160 : 240;
+  if (particles.length > cap) return;            // cap for mobile perf
   const spd = o.spd || 2, grav = o.grav == null ? 0.15 : o.grav, life = o.life || 20, size = o.size || 2;
   for (let i = 0; i < n; i++) {
     const a = Math.random() * Math.PI * 2, v = spd * (0.4 + Math.random() * 0.8);
@@ -772,7 +949,7 @@ function processVfx(s) {
       const x = idx % COLS, y = (idx / COLS) | 0;
       spawnBurst(x * TILE + 16, y * TILE + 16, TH().flameMid, 5, { spd: 3, grav: 0.1, life: 16, size: 3 });
       spawnBurst(x * TILE + 16, y * TILE + 16, TH().flameCore, 3, { spd: 2, grav: 0.04, life: 12, size: 2 });
-      if (me) { const d = Math.hypot(me.x - x, me.y - y); shake = Math.max(shake, Math.max(2, 8 - d * 1.1)); }
+      if (me && settings.shake) { const d = Math.hypot(me.x - x, me.y - y); shake = Math.max(shake, Math.max(2, 8 - d * 1.1)); }
     }
   }
   prevExpl = new Set(s.explosions);
@@ -851,13 +1028,18 @@ function showMatchOverlay(m, mine, info) {
     html += `<div><span style="color:${r.color}">${r.name}</span> +${r.xp}XP +${r.coins}◎ (${r.breakdown.kills}K ${r.breakdown.crates}C)${meTag}</div>`;
   }
   html += '</div>';
+  // ranked MMR change
+  if (info && info.mmrDelta != null) {
+    const up = info.mmrDelta >= 0;
+    html += `<div class="sub" style="color:${up ? 'var(--p4)' : 'var(--p2)'}">RANKED MMR ${up ? '+' : ''}${info.mmrDelta}</div>`;
+  }
   // your XP bar + level
   if (info) {
     const lv = SHARED.levelFromXp(profile.xp);
     html += `<div class="xpbar"><div class="xpbar-fill" style="width:${Math.round((lv.into / lv.need) * 100)}%"></div></div>`;
     html += `<div class="sub">LV ${lv.level} · ${lv.into}/${lv.need} XP · ◎ ${profile.coins}</div>`;
     if (info.after > info.before) html += `<div class="big levelup">LEVEL UP! ${info.before}→${info.after}</div>`;
-    if (info.newly.length) html += `<div class="sub" style="color:var(--accent)">UNLOCKED: ${info.newly.join(', ')}</div>`;
+    if (info.newly && info.newly.length) html += `<div class="sub" style="color:var(--accent)">UNLOCKED: ${info.newly.join(', ')}</div>`;
   }
   html += `<div class="sub" style="color:var(--dim)">returning to lobby...</div>`;
   ov.innerHTML = html;

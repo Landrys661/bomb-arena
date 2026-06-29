@@ -121,6 +121,34 @@ Launches fullscreen in landscape.
 
 ---
 
+## Accounts, database & ranked (V4)
+
+Profiles now persist **server-side** so progress survives sessions, devices, and
+redeploys. Guests can still play casually (local-only profile); **ranked requires
+an account.**
+
+- **Database:** thin layer in [`db.js`](db.js). Defaults to **better-sqlite3**
+  (single file at `DB_PATH`, default `./data/bombarena.db`); if the native module
+  isn't installed it transparently falls back to a **JSON file** so the server
+  still runs. For an **ephemeral-disk host (e.g. Render free), the file resets on
+  redeploy** — attach a **persistent disk**, or switch to **PostgreSQL** (add `pg`
+  and implement the same method surface as an async adapter; the layer is isolated
+  for exactly this).
+- **Security:** passwords are hashed with **bcryptjs** (never stored plaintext);
+  sessions are random tokens stored in the DB and cached in `localStorage` for
+  auto-login; inputs validated/sanitized. Serve over **HTTPS** (your host provides
+  it). Server is authoritative for XP/coins/stats and **MMR** (Elo, K=32, start
+  1000) — client results are never trusted.
+- **Env/config:** `PORT` (host-provided), `DB_PATH` (optional, SQLite file path).
+  No secret is required for sessions (random tokens), but keep the DB file private.
+- **Endpoints:** `POST /api/register|login|logout|change-password`,
+  `GET /api/me`, `POST /api/profile`, `GET /api/leaderboard`.
+- Accounts, leaderboard, and ranked require the **hosted** server. The Electron
+  "Host Locally" LAN mode remains for casual local play (guest profiles).
+
+> Render with persistence: add a Disk (mount e.g. `/data`) and set
+> `DB_PATH=/data/bombarena.db`, or provision Postgres and use the async adapter.
+
 ## Project structure
 
 ```

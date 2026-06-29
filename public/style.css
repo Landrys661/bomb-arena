@@ -365,6 +365,29 @@ body.touch .controls { display: none; }        /* hide keyboard hint on touch */
 .overlay .xpbar { max-width: 300px; }
 .overlay .levelup { color: var(--p4); font-size: 16px; }
 
+/* ---- V4: account bar, settings sections, leaderboard ---- */
+.acct-bar { font-family: inherit; background: var(--panel); border: 2px solid var(--line); color: var(--ink); font-size: 9px; padding: 8px 10px; cursor: pointer; width: 100%; }
+.acct-bar:hover { border-color: var(--accent); }
+.set-section { width: 100%; background: var(--panel); border: 3px solid var(--line); padding: 10px; text-align: left; display: flex; flex-direction: column; gap: 8px; }
+.set-section h3 { margin: 0 0 2px; font-size: 10px; color: var(--accent); }
+.set-row { display: flex; align-items: center; gap: 8px; font-size: 9px; color: var(--ink); }
+.set-range { flex: 1; min-width: 0; }
+.set-select { font-family: inherit; font-size: 9px; background: #000; color: var(--ink); border: 2px solid var(--line); padding: 4px; }
+.lb-list { list-style: none; padding: 0; margin: 0; width: 100%; display: flex; flex-direction: column; gap: 4px; overflow-y: auto; }
+.lb-list li { display: flex; align-items: center; gap: 8px; background: var(--panel); border: 2px solid var(--line); padding: 8px; font-size: 9px; }
+.lb-rank { color: var(--dim); width: 34px; flex: 0 0 auto; }
+.lb-name { flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lb-tier { font-size: 8px; flex: 0 0 auto; }
+.lb-mmr { color: var(--accent); flex: 0 0 auto; }
+.lb-empty { color: var(--dim); justify-content: center; text-align: center; }
+
+/* reduced-motion: drop heavy text shadows / animations */
+body.reduce-motion .logo { text-shadow: 2px 2px 0 #000; }
+
+/* Phase 0 text-fit guard: long labels wrap inside their box instead of clipping */
+.btn { white-space: normal; overflow-wrap: anywhere; line-height: 1.3; }
+.hr-toggle, .item-name, .item-desc { overflow-wrap: anywhere; }
+
 /* ---- CRT scanline overlay ---- */
 .crt {
   position: fixed;

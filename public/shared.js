@@ -68,6 +68,21 @@
 
   const MATCH_WINS = 3;   // first to this many round wins takes the match
 
+  /* ---- ranked tiers mapped from MMR (Elo) ---- */
+  const RANK_TIERS = [
+    { name: 'BRONZE',   min: 0,    color: '#b08050' },
+    { name: 'SILVER',   min: 1100, color: '#c0c8d0' },
+    { name: 'GOLD',     min: 1200, color: '#fcc800' },
+    { name: 'PLATINUM', min: 1350, color: '#48d0c0' },
+    { name: 'DIAMOND',  min: 1500, color: '#78b0fc' },
+    { name: 'MASTER',   min: 1700, color: '#e060fc' },
+  ];
+  function rankTier(mmr) {
+    let t = RANK_TIERS[0];
+    for (const r of RANK_TIERS) if ((mmr | 0) >= r.min) t = r;
+    return t;
+  }
+
   /* ---- validation helpers (server trusts client *choice* but not invalid ids) */
   const pick = (table, id, def) => (table[id] ? id : def);
   function sanitizeLoadout(l) {
@@ -82,7 +97,7 @@
 
   return {
     BOMB_TYPES, ABILITIES, CLASSES, COSMETICS, DEFAULT_LOADOUT,
-    XP_REWARDS, COIN_REWARDS, MATCH_WINS,
-    xpToAdvance, levelFromXp, sanitizeLoadout,
+    XP_REWARDS, COIN_REWARDS, MATCH_WINS, RANK_TIERS,
+    xpToAdvance, levelFromXp, sanitizeLoadout, rankTier,
   };
 });

@@ -3,3 +3,7 @@ npm-debug.log*
 *.log
 .DS_Store
 .claude/
+data/
+*.db
+*.db-shm
+*.db-wal

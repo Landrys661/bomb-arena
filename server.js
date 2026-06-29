@@ -109,6 +109,104 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.json({ limit: '64kb' }));
+
+/* ----------------------------------------------------------------------------
+ * 2b. ACCOUNTS / AUTH  (server-side persistence; passwords bcrypt-hashed)
+ * --------------------------------------------------------------------------*/
+const DB = require('./db.js');
+const bcrypt = require('bcryptjs');
+const USER_RE = /^[a-zA-Z0-9_]{3,16}$/;
+
+function defaultProfile() {
+  return {
+    xp: 0, coins: 0,
+    loadout: Object.assign({}, SHARED.DEFAULT_LOADOUT),
+    unlocks: { bomb: [], ability: [], cls: [], hat: [] },
+    stats: { wins: 0, losses: 0, kills: 0, crates: 0, matches: 0 },
+  };
+}
+function publicAccount(u) {
+  return {
+    username: u.username, mmr: u.mmr, ranked_w: u.ranked_w, ranked_l: u.ranked_l,
+    level: SHARED.levelFromXp(u.profile.xp || 0).level,
+    profile: u.profile,
+  };
+}
+function userFromAuth(req) {
+  const h = req.headers['authorization'] || '';
+  const token = h.startsWith('Bearer ') ? h.slice(7) : (req.query.token || (req.body && req.body.token));
+  if (!token) return null;
+  const id = DB.sessionUser(token); if (!id) return null;
+  return DB.userById(id);
+}
+
+app.post('/api/register', async (req, res) => {
+  const { username, password } = req.body || {};
+  if (!USER_RE.test(username || '')) return res.status(400).json({ error: 'Username: 3-16 letters, numbers or _.' });
+  if (typeof password !== 'string' || password.length < 6 || password.length > 100) return res.status(400).json({ error: 'Password must be 6-100 characters.' });
+  try {
+    const passHash = await bcrypt.hash(password, 10);
+    const u = DB.createUser({ username, passHash, profile: defaultProfile() });
+    res.json({ token: DB.newSession(u.id), account: publicAccount(u) });
+  } catch (e) {
+    if (e.code === 'DUP') return res.status(409).json({ error: 'That username is taken.' });
+    res.status(500).json({ error: 'Server error.' });
+  }
+});
+
+app.post('/api/login', async (req, res) => {
+  const { username, password } = req.body || {};
+  const u = DB.userByName(String(username || '').toLowerCase());
+  if (!u || !(await bcrypt.compare(String(password || ''), u.pass_hash))) return res.status(401).json({ error: 'Wrong username or password.' });
+  res.json({ token: DB.newSession(u.id), account: publicAccount(u) });
+});
+
+app.post('/api/logout', (req, res) => {
+  const h = req.headers['authorization'] || '';
+  const token = h.startsWith('Bearer ') ? h.slice(7) : (req.body && req.body.token);
+  if (token) DB.endSession(token);
+  res.json({ ok: true });
+});
+
+app.post('/api/change-password', async (req, res) => {
+  const u = userFromAuth(req);
+  if (!u) return res.status(401).json({ error: 'Not logged in.' });
+  const { oldPassword, newPassword } = req.body || {};
+  if (!(await bcrypt.compare(String(oldPassword || ''), u.pass_hash))) return res.status(401).json({ error: 'Current password is wrong.' });
+  if (typeof newPassword !== 'string' || newPassword.length < 6 || newPassword.length > 100) return res.status(400).json({ error: 'New password must be 6-100 characters.' });
+  const hash = await bcrypt.hash(newPassword, 10);
+  if (DB.setPassword) DB.setPassword(u.id, hash);
+  res.json({ ok: true });
+});
+
+app.get('/api/me', (req, res) => {
+  const u = userFromAuth(req);
+  if (!u) return res.status(401).json({ error: 'Not logged in.' });
+  res.json({ account: publicAccount(u) });
+});
+
+// client may push cosmetic/loadout/unlock changes; xp/coins/mmr stay server-authoritative
+app.post('/api/profile', (req, res) => {
+  const u = userFromAuth(req);
+  if (!u) return res.status(401).json({ error: 'Not logged in.' });
+  const incoming = (req.body && req.body.profile) || {};
+  const p = u.profile;
+  if (incoming.loadout) p.loadout = SHARED.sanitizeLoadout(incoming.loadout);
+  if (incoming.unlocks && typeof incoming.unlocks === 'object') {
+    for (const k of ['bomb', 'ability', 'cls', 'hat']) if (Array.isArray(incoming.unlocks[k])) p.unlocks[k] = incoming.unlocks[k].slice(0, 64);
+  }
+  DB.saveProfile(u.id, p);
+  res.json({ account: publicAccount(u) });
+});
+
+app.get('/api/leaderboard', (req, res) => {
+  const rows = DB.leaderboard(50).map((u, i) => ({
+    rank: i + 1, username: u.username, mmr: u.mmr, ranked_w: u.ranked_w, ranked_l: u.ranked_l,
+    level: SHARED.levelFromXp((u.profile && u.profile.xp) || 0).level,
+  }));
+  res.json({ leaderboard: rows });
+});
 
 const PORT = process.env.PORT || 3000;
 // startServer() lets the Electron app host a match in-process ("Host Locally").
@@ -126,6 +224,43 @@ if (require.main === module) startServer(PORT);
 const rooms = {};
 const socketRoom = {};
 
+/* ---- ranked matchmaking queue (1v1, Elo). Pairs closest MMR; the wait widens
+ * the acceptable gap so a match always eventually happens (small-playerbase ok). */
+const rankedQueue = [];   // { socket, userId, mmr, name, joinedAt }
+function dequeueRanked(socketId) {
+  const i = rankedQueue.findIndex(e => e.socket.id === socketId);
+  if (i >= 0) rankedQueue.splice(i, 1);
+}
+function startRankedMatch(a, b) {
+  const room = createRoom(true, true);   // balanced + ranked
+  for (const e of [a, b]) {
+    const u = DB.userById(e.userId);
+    const auth = u
+      ? { userId: u.id, name: u.username, loadout: u.profile.loadout, level: SHARED.levelFromXp(u.profile.xp || 0).level }
+      : { userId: null, name: e.name, loadout: null, level: 1 };
+    joinExistingRoom(e.socket, room, auth);
+    const p = room.players.get(e.socket.id);
+    if (p) p.ready = true;
+  }
+  emitRoomState(room);
+  maybeStartCountdown(room);
+}
+function matchmakeRanked() {
+  if (rankedQueue.length < 2) return;
+  rankedQueue.sort((x, y) => x.mmr - y.mmr);
+  for (let i = 0; i < rankedQueue.length - 1; i++) {
+    const a = rankedQueue[i], b = rankedQueue[i + 1];
+    const waited = Date.now() - Math.min(a.joinedAt, b.joinedAt);
+    const tol = 100 + Math.floor(waited / 1000) * 50;   // widen 50 MMR per second
+    if (Math.abs(a.mmr - b.mmr) <= tol || waited > 20000) {
+      rankedQueue.splice(i, 2);
+      startRankedMatch(a, b);
+      return matchmakeRanked();
+    }
+  }
+}
+setInterval(matchmakeRanked, 1000);
+
 function makeRoomCode() {
   const letters = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
   let code;
@@ -136,13 +271,14 @@ function makeRoomCode() {
   return code;
 }
 
-function createRoom(balanced) {
+function createRoom(balanced, ranked) {
   const code = makeRoomCode();
   const room = {
     code,
     players: new Map(),
     phase: 'lobby',                 // lobby | countdown | playing | roundover | matchover
     balanced: !!balanced,           // quick-play = balanced; private = personal loadouts
+    ranked: !!ranked,               // ranked 1v1 (Elo) vs casual
     hostId: null,
     houseRules: { doublePowerups: false, suddenDeath: false },
     arenaPick: 'dungeon',           // host choice ('random' allowed); resolved per round
@@ -173,10 +309,11 @@ function freeSlot(room) {
   return -1;
 }
 
-function makePlayer(id, name, slot, loadout, level) {
+function makePlayer(id, name, slot, loadout, level, userId) {
   return {
     id, name: (name || 'PLAYER').slice(0, 10).toUpperCase(), slot,
     color: COLORS[slot],
+    userId: userId || null,        // DB account id when logged in (else guest)
     loadout: SHARED.sanitizeLoadout(loadout),
     level: Math.max(1, (level | 0) || 1),
     ready: false, spawned: false, played: false, alive: false,
@@ -895,26 +1032,56 @@ function endMatch(room, winner) {
   room.roundOver = MATCHOVER_TICKS;
   room.matchActive = false;
   const XP = SHARED.XP_REWARDS, CO = SHARED.COIN_REWARDS;
+
+  // ranked 1v1 Elo update (server-authoritative; both must be logged in)
+  let elo = null;
+  if (room.ranked && winner && winner.userId) {
+    const ps = [...room.players.values()].filter(p => p.played && p.userId);
+    if (ps.length === 2) {
+      const a = DB.userById(ps[0].userId), b = DB.userById(ps[1].userId);
+      if (a && b && a.id !== b.id) {
+        const wA = winner.userId === a.id, K = 32;
+        const Ea = 1 / (1 + Math.pow(10, (b.mmr - a.mmr) / 400));
+        const Ra2 = Math.round(a.mmr + K * ((wA ? 1 : 0) - Ea));
+        const Rb2 = Math.round(b.mmr + K * ((wA ? 0 : 1) - (1 - Ea)));
+        DB.setMMR(a.id, Ra2, wA); DB.setMMR(b.id, Rb2, !wA);
+        elo = { [a.id]: { before: a.mmr, after: Ra2 }, [b.id]: { before: b.mmr, after: Rb2 } };
+      }
+    }
+  }
+
   const results = [];
   for (const p of room.players.values()) {
     if (!p.played) continue;
     const won = winner && winner.id === p.id;
     const s = p.stats;
-    const xp =
-      s.crates * XP.crate + s.kills * XP.kill + s.roundWins * XP.roundWin +
-      (won ? XP.matchWin + XP.placement : 0);
-    const coins =
-      s.crates * CO.crate + s.kills * CO.kill + s.roundWins * CO.roundWin +
-      (won ? CO.matchWin : 0) + CO.participate;
-    results.push({
-      id: p.id, slot: p.slot, name: p.name, color: p.color, won,
-      xp, coins, breakdown: { crates: s.crates, kills: s.kills, roundWins: s.roundWins, won },
-    });
+    const xp = s.crates * XP.crate + s.kills * XP.kill + s.roundWins * XP.roundWin + (won ? XP.matchWin + XP.placement : 0);
+    const coins = s.crates * CO.crate + s.kills * CO.kill + s.roundWins * CO.roundWin + (won ? CO.matchWin : 0) + CO.participate;
+    const r = {
+      id: p.id, slot: p.slot, name: p.name, color: p.color, won, xp, coins,
+      breakdown: { crates: s.crates, kills: s.kills, roundWins: s.roundWins, won }, saved: false,
+    };
+    // persist to the DB for logged-in accounts (XP/coins/stats are server-authoritative)
+    if (p.userId) {
+      const u = DB.userById(p.userId);
+      if (u) {
+        u.profile.xp = (u.profile.xp || 0) + xp;
+        u.profile.coins = (u.profile.coins || 0) + coins;
+        const st = u.profile.stats || (u.profile.stats = { wins: 0, losses: 0, kills: 0, crates: 0, matches: 0 });
+        st.matches++; st.kills += s.kills; st.crates += s.crates; if (won) st.wins++; else st.losses++;
+        DB.saveProfile(u.id, u.profile);
+        r.saved = true;
+        r.level = SHARED.levelFromXp(u.profile.xp).level;
+        if (elo && elo[u.id]) { r.mmrBefore = elo[u.id].before; r.mmrAfter = elo[u.id].after; r.mmrDelta = elo[u.id].after - elo[u.id].before; }
+      }
+    }
+    results.push(r);
   }
   io.to(room.code).emit('matchOver', {
     winnerId: winner ? winner.id : null,
     winnerName: winner ? winner.name : null,
     winnerSlot: winner ? winner.slot : null,
+    ranked: !!room.ranked,
     results,
   });
 }
@@ -978,10 +1145,23 @@ function roomTick(room) {
 /* ----------------------------------------------------------------------------
  * 8. SOCKET EVENT HANDLERS
  * --------------------------------------------------------------------------*/
-function joinExistingRoom(socket, name, room, loadout, level) {
+// Resolve a session token to a logged-in account; logged-in players use their
+// server-side name/loadout/level (can't be spoofed). Guests use client values.
+function resolveAuth({ token, name, loadout, level }) {
+  if (token) {
+    const id = DB.sessionUser(token);
+    if (id) {
+      const u = DB.userById(id);
+      if (u) return { userId: u.id, name: u.username, loadout: u.profile.loadout, level: SHARED.levelFromXp(u.profile.xp || 0).level };
+    }
+  }
+  return { userId: null, name, loadout, level };
+}
+
+function joinExistingRoom(socket, room, auth) {
   const slot = freeSlot(room);
   if (slot < 0) { socket.emit('errorMsg', { message: 'ROOM IS FULL' }); return false; }
-  const player = makePlayer(socket.id, name, slot, loadout, level);
+  const player = makePlayer(socket.id, auth.name, slot, auth.loadout, auth.level, auth.userId);
   room.players.set(socket.id, player);
   if (!room.hostId) room.hostId = socket.id;
   socketRoom[socket.id] = room.code;
@@ -994,21 +1174,21 @@ io.on('connection', (socket) => {
   const currentRoom = () => rooms[socketRoom[socket.id]] || null;
   const currentPlayer = () => { const r = currentRoom(); return r ? r.players.get(socket.id) : null; };
 
-  socket.on('joinRoom', ({ name, roomCode, loadout, level } = {}) => {
+  socket.on('joinRoom', ({ name, roomCode, loadout, level, token } = {}) => {
     if (currentRoom()) return;
     let room;
     if (roomCode) {
       room = rooms[String(roomCode).toUpperCase()];
       if (!room) { socket.emit('errorMsg', { message: 'NO SUCH ROOM' }); return; }
     } else { room = createRoom(false); }      // private room => personal loadouts
-    joinExistingRoom(socket, name, room, loadout, level);
+    joinExistingRoom(socket, room, resolveAuth({ token, name, loadout, level }));
   });
 
-  socket.on('quickPlay', ({ name, loadout, level } = {}) => {
+  socket.on('quickPlay', ({ name, loadout, level, token } = {}) => {
     if (currentRoom()) return;
-    let room = Object.values(rooms).find(r => r.balanced && r.phase === 'lobby' && r.players.size < MAX_PLAYERS);
+    let room = Object.values(rooms).find(r => r.balanced && !r.ranked && r.phase === 'lobby' && r.players.size < MAX_PLAYERS);
     if (!room) room = createRoom(true);        // balanced matchmaking room
-    joinExistingRoom(socket, name, room, loadout, level);
+    joinExistingRoom(socket, room, resolveAuth({ token, name, loadout, level }));
   });
 
   socket.on('setLoadout', ({ loadout, level } = {}) => {
@@ -1018,6 +1198,18 @@ io.on('connection', (socket) => {
     if (level) p.level = Math.max(1, level | 0);
     emitRoomState(room);
   });
+
+  socket.on('rankedQueue', ({ token } = {}) => {
+    if (currentRoom()) return;
+    const id = token && DB.sessionUser(token);
+    const u = id && DB.userById(id);
+    if (!u) { socket.emit('errorMsg', { message: 'RANKED NEEDS AN ACCOUNT' }); return; }
+    if (rankedQueue.some(e => e.socket.id === socket.id)) return;
+    rankedQueue.push({ socket, userId: u.id, mmr: u.mmr, name: u.username, joinedAt: Date.now() });
+    socket.emit('rankedStatus', { queued: true, size: rankedQueue.length });
+    matchmakeRanked();
+  });
+  socket.on('cancelRanked', () => { dequeueRanked(socket.id); socket.emit('rankedStatus', { queued: false, size: rankedQueue.length }); });
 
   socket.on('setHouseRule', ({ key, value } = {}) => {
     const room = currentRoom();
@@ -1066,6 +1258,7 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => leave());
 
   function leave() {
+    dequeueRanked(socket.id);              // drop from ranked queue if waiting
     const room = currentRoom();
     if (!room) return;
     const wasHost = room.hostId === socket.id;

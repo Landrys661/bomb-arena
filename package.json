@@ -18,24 +18,41 @@
     "node": ">=18"
   },
   "dependencies": {
+    "bcryptjs": "^2.4.3",
     "express": "^4.19.2",
     "socket.io": "^4.7.5"
   },
   "devDependencies": {
-    "electron": "^31.0.0",
-    "electron-builder": "^24.13.3",
-    "cross-env": "^7.0.3",
+    "@capacitor/android": "^6.1.0",
     "@capacitor/cli": "^6.1.0",
     "@capacitor/core": "^6.1.0",
-    "@capacitor/android": "^6.1.0",
-    "@capacitor/ios": "^6.1.0"
+    "@capacitor/ios": "^6.1.0",
+    "cross-env": "^7.0.3",
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
   },
   "build": {
     "appId": "com.bombarena.app",
     "productName": "Bomb Arena",
-    "files": ["server.js", "electron/**", "public/**", "package.json", "node_modules/**"],
-    "win": { "target": "nsis" },
-    "mac": { "target": "dmg", "category": "public.app-category.games" },
-    "linux": { "target": "AppImage" }
+    "files": [
+      "server.js",
+      "electron/**",
+      "public/**",
+      "package.json",
+      "node_modules/**"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.games"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
+  },
+  "optionalDependencies": {
+    "better-sqlite3": "^12.11.1"
   }
 }

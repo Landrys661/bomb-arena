@@ -163,7 +163,7 @@ let seenBombs = new Set(), prevPU = new Map(), prevAlive = {}, prevCurse = {};
 let particles = [], shake = 0, prevCrates = new Set(), prevExpl = new Set();
 
 const $ = id => document.getElementById(id);
-const screens = { landing: $('landing'), settings: $('settings'), collection: $('collection'), lobby: $('lobby'), game: $('game') };
+const screens = { landing: $('landing'), auth: $('auth'), leaderboard: $('leaderboard'), settings: $('settings'), collection: $('collection'), lobby: $('lobby'), game: $('game') };
 function showScreen(name) { for (const k in screens) screens[k].classList.toggle('hidden', k !== name); }
 
 socket.on('connect', () => { myId = socket.id; });

@@ -279,6 +279,7 @@ function createRoom(balanced, ranked) {
     phase: 'lobby',                 // lobby | countdown | playing | roundover | matchover
     balanced: !!balanced,           // quick-play = balanced; private = personal loadouts
     ranked: !!ranked,               // ranked 1v1 (Elo) vs casual
+    mode: 'lbs',                    // lbs (last bomber) | zombie | ...
     hostId: null,
     houseRules: { doublePowerups: false, suddenDeath: false },
     arenaPick: 'dungeon',           // host choice ('random' allowed); resolved per round
@@ -323,7 +324,7 @@ function makePlayer(id, name, slot, loadout, level, userId) {
     maxBombs: BASE_BOMBS, maxBombsCap: MAX_BOMBS, activeBombs: 0,
     range: BASE_RANGE, rangePenalty: 0, speed: BASE_SPEED,
     canKick: false, canThrow: false, bombPierce: false, bombRemote: false,
-    armor: 0, shieldUntil: 0, phaseUntil: 0, curse: null, abilityCd: 0, tpCd: 0,
+    armor: 0, shieldUntil: 0, phaseUntil: 0, curse: null, abilityCd: 0, tpCd: 0, infected: false,
     matchScore: 0,                       // round wins this match
     stats: { kills: 0, crates: 0, roundWins: 0 },
   };
@@ -344,6 +345,7 @@ function emitRoomState(room) {
     balanced: room.balanced,
     hostId: room.hostId,
     houseRules: room.houseRules,
+    mode: room.mode,
     arenaPick: room.arenaPick,
     arenas: ARENAS,
     matchWins: SHARED.MATCH_WINS,
@@ -579,15 +581,20 @@ function botWalkable(room, x, y) {
   if (bombAt(room, x, y)) return false;
   return true;
 }
+// team awareness: in zombie, only infected may attack uninfected (survivors don't attack)
+function botCanAttack(self, other, room) {
+  if (room.mode === 'zombie') return self.infected ? !other.infected : false;
+  return true;
+}
 function enemyAt(room, x, y, self) {
   for (const p of room.players.values())
-    if (p !== self && p.spawned && p.alive && Math.round(p.x) === x && Math.round(p.y) === y) return true;
+    if (p !== self && p.spawned && p.alive && botCanAttack(self, p, room) && Math.round(p.x) === x && Math.round(p.y) === y) return true;
   return false;
 }
 function nearestEnemy(room, self, sx, sy) {
   let best = null, bd = 1e9;
   for (const p of room.players.values()) {
-    if (p === self || !(p.spawned && p.alive)) continue;
+    if (p === self || !(p.spawned && p.alive) || !botCanAttack(self, p, room)) continue;
     const d = Math.abs(Math.round(p.x) - sx) + Math.abs(Math.round(p.y) - sy);
     if (d < bd) { bd = d; best = { x: Math.round(p.x), y: Math.round(p.y) }; }
   }
@@ -657,6 +664,10 @@ function botThink(bot, room) {
   const bx = Math.round(bot.x), by = Math.round(bot.y);
   const realDanger = dangerSet(room, false);  // current flame/hazard -> never enter
   const future = dangerSet(room, true);       // + soon-to-blast -> get out of these
+  // zombie survivors steer clear of the infected
+  if (room.mode === 'zombie' && !bot.infected) {
+    for (const p of room.players.values()) if (p.spawned && p.alive && p.infected) future.add(idxOf(Math.round(p.x), Math.round(p.y)));
+  }
 
   const dirs = ['up', 'down', 'left', 'right'];
   // 1) flee if our tile is (or will soon be) dangerous: path out via current-safe tiles
@@ -1113,10 +1124,12 @@ function simulate(room) {
   for (const idx of room.danger) if (!flame.has(idx)) flame.set(idx, null);   // arena hazards (no kill credit)
   for (const p of room.players.values()) {
     if (!(p.spawned && p.alive)) continue;
+    if (room.mode === 'zombie' && p.infected) continue;     // zombies are immune to flame
     const key = Math.round(p.y) * COLS + Math.round(p.x);
     if (!flame.has(key)) continue;
     if (room.tick < p.shieldUntil) continue;
     if (p.armor > 0) { p.armor--; p.shieldUntil = room.tick + ARMOR_IFRAMES; continue; }
+    if (room.mode === 'zombie') { p.infected = true; continue; }   // infected, not killed
     p.alive = false;
     const killerId = flame.get(key);
     if (killerId && killerId !== p.id) {
@@ -1125,10 +1138,15 @@ function simulate(room) {
     }
   }
 
-  // win detection
+  // win detection (mode-aware)
   const inGame = [...room.players.values()].filter(p => p.spawned);
-  const alive = inGame.filter(p => p.alive);
-  if (inGame.length >= 1 && alive.length <= 1) setRoundOver(room, alive.length === 1 ? alive[0] : null);
+  if (room.mode === 'zombie') {
+    const clean = inGame.filter(p => p.alive && !p.infected);   // last uninfected survivor wins
+    if (inGame.length >= 1 && clean.length <= 1) setRoundOver(room, clean.length === 1 ? clean[0] : null);
+  } else {
+    const alive = inGame.filter(p => p.alive);
+    if (inGame.length >= 1 && alive.length <= 1) setRoundOver(room, alive.length === 1 ? alive[0] : null);
+  }
 }
 
 /* ----------------------------------------------------------------------------
@@ -1165,15 +1183,22 @@ function startRound(room) {
     p.maxBombs = BASE_BOMBS; p.maxBombsCap = MAX_BOMBS; p.activeBombs = 0;
     p.range = BASE_RANGE; p.rangePenalty = 0; p.speed = BASE_SPEED;
     p.canKick = false; p.canThrow = false; p.bombPierce = false; p.bombRemote = false;
-    p.armor = 0; p.shieldUntil = 0; p.phaseUntil = 0; p.curse = null; p.abilityCd = 0;
+    p.armor = 0; p.shieldUntil = 0; p.phaseUntil = 0; p.curse = null; p.abilityCd = 0; p.infected = false;
     applyClass(p);
     spawns.push({ slot: p.slot, x: sx, y: sy });
+  }
+
+  // Zombie mode: one random player starts infected
+  if (room.mode === 'zombie') {
+    const ps = [...room.players.values()].filter(p => p.spawned);
+    if (ps.length) ps[(Math.random() * ps.length) | 0].infected = true;
   }
 
   room.phase = 'playing';
   io.to(room.code).emit('gameStart', {
     map: room.map, spawns,
     balanced: room.balanced,
+    mode: room.mode,
     arena: room.arena,
     conveyors: room.conveyors, teleports: room.teleports, iceFloor: room.iceFloor,
     lavaTiles: room.lavaTiles,
@@ -1292,7 +1317,7 @@ function broadcastState(room) {
       cu: p.curse && room.tick < p.curse.until ? p.curse.type : 0,
       ph: p.phaseUntil > room.tick ? 1 : 0,
       cd: p.abilityCd, cm: Math.round((SHARED.ABILITIES[p.loadout.ability]?.cd || 1) * TICK_RATE),
-      mb: p.maxBombs, ab: p.activeBombs, rg: p.range,
+      mb: p.maxBombs, ab: p.activeBombs, rg: p.range, z: p.infected ? 1 : 0,
       k: (p.canKick ? 1 : 0) | (p.canThrow ? 2 : 0) | (p.bombRemote ? 4 : 0) | (p.bombPierce ? 8 : 0),
     })),
     bombs: room.bombs.map(b => ({ id: b.id, x: b.x, y: b.y, f: b.fuse === Infinity ? -1 : b.fuse, t: b.type, m: b.mine ? (b.armed ? 2 : 1) : 0 })),
@@ -1406,6 +1431,12 @@ io.on('connection', (socket) => {
     const room = currentRoom();
     if (!room || socket.id !== room.hostId || room.phase !== 'lobby') return;
     if (arena === 'random' || ARENAS.includes(arena)) { room.arenaPick = arena; emitRoomState(room); }
+  });
+
+  socket.on('setMode', ({ mode } = {}) => {
+    const room = currentRoom();
+    if (!room || socket.id !== room.hostId || room.ranked || room.phase !== 'lobby') return;
+    if (mode === 'lbs' || mode === 'zombie') { room.mode = mode; emitRoomState(room); }
   });
 
   socket.on('addBot', ({ difficulty } = {}) => {

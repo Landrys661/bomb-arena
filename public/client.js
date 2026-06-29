@@ -158,6 +158,7 @@ let meta = {};                   // slot -> {name,color,level,loadout}
 let balanced = false, hostId = null, houseRules = {}, matchWins = 3;
 let arenaPick = 'dungeon', arenaList = [];
 let arena = 'dungeon', conveyors = {}, teleports = [], iceFloor = false, lavaTiles = [];
+let gameMode = 'lbs';
 let curTheme = null, ambient = [];
 let seenBombs = new Set(), prevPU = new Map(), prevAlive = {}, prevCurse = {};
 let particles = [], shake = 0, prevCrates = new Set(), prevExpl = new Set();
@@ -175,7 +176,7 @@ socket.on('errorMsg', ({ message }) => { $('landingMsg').textContent = message |
 
 socket.on('roomState', (st) => {
   balanced = st.balanced; hostId = st.hostId; houseRules = st.houseRules || {}; matchWins = st.matchWins || 3;
-  arenaPick = st.arenaPick || 'dungeon'; arenaList = st.arenas || [];
+  arenaPick = st.arenaPick || 'dungeon'; arenaList = st.arenas || []; gameMode = st.mode || 'lbs';
   roster = st.players.map(p => ({ ...p }));
   for (const p of st.players) meta[p.slot] = { name: p.name, color: p.color, level: p.level, loadout: p.loadout };
   const me = st.players.find(p => p.id === myId); if (me) mySlot = me.slot;
@@ -187,6 +188,7 @@ socket.on('roomState', (st) => {
     $('roomMode').textContent = balanced ? 'QUICK PLAY · BALANCED' : 'PRIVATE · YOUR LOADOUTS';
     $('matchInfo').textContent = `FIRST TO ${matchWins} WINS`;
     renderPlayerList(st.players);
+    renderModePicker();
     renderArenaPicker();
     renderBotControls();
     renderHouseRules();
@@ -200,7 +202,7 @@ socket.on('gameStart', (g) => {
   phase = 'playing'; mapGrid = g.map;
   if (typeof hideRankedOverlay === 'function') hideRankedOverlay();
   arena = g.arena || 'dungeon'; conveyors = g.conveyors || {}; teleports = g.teleports || []; iceFloor = !!g.iceFloor;
-  lavaTiles = g.lavaTiles || [];
+  lavaTiles = g.lavaTiles || []; gameMode = g.mode || 'lbs';
   setTheme(arena);
   seenBombs = new Set(); prevPU = new Map(); prevAlive = {}; prevCurse = {}; snapshot = null;
   particles = []; shake = 0; prevCrates = new Set(); prevExpl = new Set();
@@ -352,6 +354,21 @@ function renderPlayerList(players) {
       `<span class="pscore">${p.score}</span>` +
       `<span class="pstatus ${p.bot ? '' : (p.ready ? 'ready' : '')}">${p.bot ? 'BOT' : (p.ready ? 'READY' : 'WAIT')}</span>`;
     ul.appendChild(li);
+  }
+}
+const MODE_NAMES = { lbs: 'LAST BOMBER', zombie: 'ZOMBIE' };
+function renderModePicker() {
+  const box = $('modePick'); if (!box) return;
+  const amHost = myId === hostId;
+  box.innerHTML = `<div class="hr-title">MODE${amHost ? '' : ' (HOST PICKS)'}</div>`;
+  for (const m of ['lbs', 'zombie']) {
+    const on = gameMode === m;
+    const b = document.createElement('button');
+    b.className = 'hr-toggle' + (on ? ' on' : '');
+    b.textContent = (on ? '▸ ' : '') + MODE_NAMES[m];
+    b.disabled = !amHost;
+    if (amHost) b.onclick = () => { ensureAudio(); socket.emit('setMode', { mode: m }); };
+    box.appendChild(b);
   }
 }
 let botDiff = 'normal';
@@ -875,11 +892,12 @@ function drawPlayerBody(cx, cy, color, f, opts) {
 }
 function drawPlayer(pl) {
   const cx = pl.x * TILE, cy = pl.y * TILE;
-  const color = COLORS[pl.i] || '#fff';
+  const color = pl.z ? '#6ab04c' : (COLORS[pl.i] || '#fff');   // infected = sickly green
   const m = meta[pl.i];
   if (pl.ph) ctx.globalAlpha = 0.6;
   drawPlayerBody(cx, cy, color, pl.f);
-  if (m && m.loadout) drawHat(cx, cy, m.loadout.hat, color);
+  if (m && m.loadout && !pl.z) drawHat(cx, cy, m.loadout.hat, color);
+  if (pl.z) { ctx.fillStyle = '#204010'; ctx.fillRect(cx + 11, cy + 1, 4, 4); ctx.fillRect(cx + 17, cy + 1, 4, 4); }  // brow
   ctx.globalAlpha = 1;
   // shield ring
   if (pl.sh) {
@@ -1029,6 +1047,10 @@ function render() {
       ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(0, canvas.height / 2 - 16, canvas.width, 32);
       ctx.fillStyle = PAL.flameEdge; ctx.font = '16px "Press Start 2P", monospace'; ctx.textAlign = 'center';
       ctx.fillText('ELIMINATED', canvas.width / 2, canvas.height / 2 + 6);
+    } else if (phase === 'playing' && gameMode === 'zombie' && me && me.z) {
+      ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(0, 6, canvas.width, 22);
+      ctx.fillStyle = '#6ab04c'; ctx.font = '12px "Press Start 2P", monospace'; ctx.textAlign = 'center';
+      ctx.fillText('INFECTED — SPREAD IT', canvas.width / 2, 22);
     }
   }
   if (phase === 'playing') renderScoreboard();

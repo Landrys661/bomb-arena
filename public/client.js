@@ -188,6 +188,7 @@ socket.on('roomState', (st) => {
     $('matchInfo').textContent = `FIRST TO ${matchWins} WINS`;
     renderPlayerList(st.players);
     renderArenaPicker();
+    renderBotControls();
     renderHouseRules();
     const cd = $('countdown');
     if (st.phase === 'countdown' && st.countdown > 0) { cd.classList.remove('hidden'); cd.textContent = st.countdown; sfx('count'); }
@@ -349,9 +350,24 @@ function renderPlayerList(players) {
       `<span class="lvbadge">L${p.level}</span>` +
       `<span class="pname">${p.name}${p.id === myId ? ' (YOU)' : ''}<br><span class="kit">${kitLabel(p.loadout)}</span></span>` +
       `<span class="pscore">${p.score}</span>` +
-      `<span class="pstatus ${p.ready ? 'ready' : ''}">${p.ready ? 'READY' : 'WAIT'}</span>`;
+      `<span class="pstatus ${p.bot ? '' : (p.ready ? 'ready' : '')}">${p.bot ? 'BOT' : (p.ready ? 'READY' : 'WAIT')}</span>`;
     ul.appendChild(li);
   }
+}
+let botDiff = 'normal';
+function renderBotControls() {
+  const box = $('botControls'); if (!box) return;
+  if (myId !== hostId) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+  box.classList.remove('hidden');
+  box.innerHTML = '<div class="hr-title">BOTS (fill the match / play solo)</div>';
+  const sel = document.createElement('select'); sel.className = 'set-select';
+  for (const d of ['easy', 'normal', 'hard']) { const o = document.createElement('option'); o.value = d; o.textContent = d.toUpperCase(); if (d === botDiff) o.selected = true; sel.appendChild(o); }
+  sel.onchange = () => { botDiff = sel.value; };
+  const add = document.createElement('button'); add.className = 'hr-toggle'; add.textContent = '+ ADD BOT';
+  add.onclick = () => { ensureAudio(); socket.emit('addBot', { difficulty: botDiff }); };
+  const rem = document.createElement('button'); rem.className = 'hr-toggle'; rem.textContent = '- REMOVE BOT';
+  rem.onclick = () => { ensureAudio(); socket.emit('removeBot'); };
+  box.appendChild(sel); box.appendChild(add); box.appendChild(rem);
 }
 function renderArenaPicker() {
   const box = $('arenaPick'); if (!box) return;

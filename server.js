@@ -333,7 +333,7 @@ function lobbyPlayer(p) {
   return {
     id: p.id, name: p.name, slot: p.slot, color: p.color,
     ready: p.ready, score: p.matchScore, alive: p.alive,
-    level: p.level, loadout: p.loadout,
+    level: p.level, loadout: p.loadout, bot: !!p.isBot,
   };
 }
 
@@ -527,6 +527,187 @@ function generateArena(arena, variant) {
   return cfg;
 }
 function teleportAt(room, x, y) { return room.teleports.find(t => t.x === x && t.y === y); }
+
+/* ----------------------------------------------------------------------------
+ * 4b. AI BOTS  (server-side players; obey the same rules, never cheat)
+ * --------------------------------------------------------------------------*/
+const BOT_DIFF = {
+  easy:   { thinkEvery: 9, mistake: 0.30, escape: false, powerups: false, seek: false, dash: false },
+  normal: { thinkEvery: 6, mistake: 0.10, escape: true,  powerups: true,  seek: true,  dash: false },
+  hard:   { thinkEvery: 3, mistake: 0.00, escape: true,  powerups: true,  seek: true,  dash: true },
+};
+let botSeq = 1;
+const inB = (x, y) => x >= 0 && y >= 0 && x < COLS && y < ROWS;
+const idxOf = (x, y) => y * COLS + x;
+
+function makeBotPlayer(slot, difficulty) {
+  const clss = ['bomber', 'speedster', 'tank', 'trickster'];
+  const p = makePlayer('bot_' + (botSeq++), 'BOT ' + difficulty[0].toUpperCase(), slot,
+    { bomb: 'classic', ability: 'dash', cls: clss[(Math.random() * clss.length) | 0], hat: 'none' }, 1, null);
+  p.isBot = true; p.difficulty = (BOT_DIFF[difficulty] ? difficulty : 'normal'); p.thinkCd = 0; p.ready = true;
+  return p;
+}
+
+// tiles a bomb would hit (cross blocked by walls; stops on first crate/tempwall)
+function blastTilesFor(room, bx, by, range) {
+  const s = new Set([idxOf(bx, by)]);
+  for (const dir of Object.keys(DIRV)) {
+    const [dx, dy] = DIRV[dir];
+    for (let r = 1; r <= range; r++) {
+      const x = bx + dx * r, y = by + dy * r;
+      if (!inB(x, y)) break;
+      const t = room.map[y][x];
+      if (t === WALL) break;
+      s.add(idxOf(x, y));
+      if (t === CRATE || t === TEMPWALL) break;
+    }
+  }
+  return s;
+}
+// set of unsafe tiles: live flame + arena danger (+ future bomb blasts if `future`)
+function dangerSet(room, future) {
+  const s = new Set();
+  for (const e of room.explosions) s.add(idxOf(e.x, e.y));
+  for (const idx of room.danger) s.add(idx);
+  if (future) for (const b of room.bombs) for (const i of blastTilesFor(room, b.x, b.y, b.range)) s.add(i);
+  return s;
+}
+function botWalkable(room, x, y) {
+  if (!inB(x, y)) return false;
+  const t = room.map[y][x];
+  if (t === WALL || t === CRATE || t === TEMPWALL) return false;
+  if (bombAt(room, x, y)) return false;
+  return true;
+}
+function enemyAt(room, x, y, self) {
+  for (const p of room.players.values())
+    if (p !== self && p.spawned && p.alive && Math.round(p.x) === x && Math.round(p.y) === y) return true;
+  return false;
+}
+function nearestEnemy(room, self, sx, sy) {
+  let best = null, bd = 1e9;
+  for (const p of room.players.values()) {
+    if (p === self || !(p.spawned && p.alive)) continue;
+    const d = Math.abs(Math.round(p.x) - sx) + Math.abs(Math.round(p.y) - sy);
+    if (d < bd) { bd = d; best = { x: Math.round(p.x), y: Math.round(p.y) }; }
+  }
+  return best;
+}
+// route toward a target treating CRATES AS PASSABLE (so bots commit to a heading
+// and blast through breakable walls); returns the first-step direction.
+function routeThroughCrates(room, sx, sy, tx, ty, realDanger) {
+  const start = idxOf(sx, sy), prev = new Map([[start, -1]]), q = [[sx, sy]];
+  let found = null;
+  while (q.length) {
+    const [x, y] = q.shift();
+    if (x === tx && y === ty) { found = idxOf(x, y); break; }
+    for (const d of ['up', 'down', 'left', 'right']) {
+      const [dx, dy] = DIRV[d], nx = x + dx, ny = y + dy, ni = idxOf(nx, ny);
+      if (!inB(nx, ny) || prev.has(ni)) continue;
+      const t = room.map[ny][nx];
+      if (t === WALL || t === TEMPWALL || bombAt(room, nx, ny) || realDanger.has(ni)) continue;
+      prev.set(ni, idxOf(x, y)); q.push([nx, ny]);
+    }
+  }
+  if (found == null) return null;
+  if (found === start) return 'none';
+  let cur = found; while (prev.get(cur) !== start) cur = prev.get(cur);
+  const cx = cur % COLS, cy = (cur / COLS) | 0;
+  if (cx - sx === 1) return 'right'; if (cx - sx === -1) return 'left';
+  if (cy - sy === 1) return 'down'; if (cy - sy === -1) return 'up';
+  return 'none';
+}
+// BFS from (sx,sy); returns first-step dir toward nearest tile where goal() is true
+// (or 'none' if already there, or null if unreachable). `avoid` = tiles not to enter.
+function botBFS(room, sx, sy, goal, avoid) {
+  const start = idxOf(sx, sy), prev = new Map([[start, -1]]), q = [[sx, sy]];
+  let found = null;
+  while (q.length) {
+    const [x, y] = q.shift();
+    if (goal(x, y, idxOf(x, y))) { found = idxOf(x, y); break; }
+    for (const d of ['up', 'down', 'left', 'right']) {
+      const [dx, dy] = DIRV[d], nx = x + dx, ny = y + dy, ni = idxOf(nx, ny);
+      if (prev.has(ni) || !botWalkable(room, nx, ny) || (avoid && avoid.has(ni))) continue;
+      prev.set(ni, idxOf(x, y)); q.push([nx, ny]);
+    }
+  }
+  if (found == null) return null;
+  if (found === start) return 'none';
+  let cur = found;
+  while (prev.get(cur) !== start) cur = prev.get(cur);
+  const cx = cur % COLS, cy = (cur / COLS) | 0;
+  if (cx - sx === 1) return 'right'; if (cx - sx === -1) return 'left';
+  if (cy - sy === 1) return 'down'; if (cy - sy === -1) return 'up';
+  return 'none';
+}
+// Can the bot reach a tile OUTSIDE its bomb's blast before it detonates?
+// The escape path may cross the bomb's own (not-yet-lethal) blast tiles; it must
+// only avoid CURRENT flame (realDanger).
+function botCanEscapeAfterBomb(room, bot, bx, by, realDanger) {
+  const blast = blastTilesFor(room, bx, by, Math.max(1, bot.range));
+  const future = dangerSet(room, true);
+  for (const i of blast) future.add(i);
+  return botBFS(room, bx, by, (x, y, i) => !future.has(i), realDanger) !== null;
+}
+function botThink(bot, room) {
+  if (bot.thinkCd > 0) { bot.thinkCd--; return; }
+  if (bot.movingTo) return;                 // decide only when grid-aligned
+  const D = BOT_DIFF[bot.difficulty] || BOT_DIFF.normal;
+  bot.thinkCd = D.thinkEvery;
+  const bx = Math.round(bot.x), by = Math.round(bot.y);
+  const realDanger = dangerSet(room, false);  // current flame/hazard -> never enter
+  const future = dangerSet(room, true);       // + soon-to-blast -> get out of these
+
+  const dirs = ['up', 'down', 'left', 'right'];
+  // 1) flee if our tile is (or will soon be) dangerous: path out via current-safe tiles
+  if (future.has(idxOf(bx, by))) {
+    const dir = botBFS(room, bx, by, (x, y, i) => !future.has(i), realDanger);
+    if (dir && dir !== 'none') {
+      bot.inputDir = dir; bot.facing = dir;
+      if (D.dash && bot.loadout.ability === 'dash' && bot.abilityCd <= 0 && Math.random() < 0.6) useAbility(room, bot);
+      return;
+    }
+  }
+  if (Math.random() < D.mistake) { bot.inputDir = dirs.concat('none')[(Math.random() * 5) | 0]; return; }
+
+  // 2) bomb an adjacent enemy or crate, only if an escape exists (normal/hard)
+  const adjEnemy = dirs.some(d => { const [dx, dy] = DIRV[d]; return enemyAt(room, bx + dx, by + dy, bot); });
+  const adjCrate = dirs.some(d => { const [dx, dy] = DIRV[d]; const x = bx + dx, y = by + dy; return inB(x, y) && room.map[y][x] === CRATE; });
+  if ((adjEnemy || adjCrate) && bot.activeBombs < bot.maxBombs && !bombAt(room, bx, by)) {
+    if (!D.escape || botCanEscapeAfterBomb(room, bot, bx, by, realDanger)) {
+      placeBomb(room, bot);
+      const f2 = dangerSet(room, true);
+      const dir = botBFS(room, bx, by, (x, y, i) => !f2.has(i), realDanger);
+      bot.inputDir = (dir && dir !== 'none') ? dir : dirs[(Math.random() * 4) | 0];
+      return;
+    }
+  }
+  // 3) grab a nearby power-up if one is cleanly reachable (avoid future-blast tiles)
+  if (D.powerups && room.powerups.length) {
+    const dir = botBFS(room, bx, by, (x, y) => room.powerups.some(p => p.x === x && p.y === y), future);
+    if (dir && dir !== 'none') { bot.inputDir = dir; return; }
+  }
+  // 4) HUNT: march toward the nearest enemy, blasting crates that block the way
+  const enemy = nearestEnemy(room, bot, bx, by);
+  if (enemy) {
+    const dir = routeThroughCrates(room, bx, by, enemy.x, enemy.y, realDanger);
+    if (dir && dir !== 'none') {
+      const [dx, dy] = DIRV[dir], nx = bx + dx, ny = by + dy;
+      if (room.map[ny][nx] === CRATE) {
+        if (bot.activeBombs < bot.maxBombs && !bombAt(room, bx, by) && (!D.escape || botCanEscapeAfterBomb(room, bot, bx, by, realDanger))) {
+          placeBomb(room, bot);
+          const f2 = dangerSet(room, true);
+          const fd = botBFS(room, bx, by, (x, y, i) => !f2.has(i), realDanger);
+          bot.inputDir = (fd && fd !== 'none') ? fd : dirs[(Math.random() * 4) | 0];
+          return;
+        }
+      } else if (!future.has(idxOf(nx, ny))) { bot.inputDir = dir; return; }
+    }
+  }
+  // 5) wander to a current-safe neighbour
+  const opts = dirs.filter(d => { const [dx, dy] = DIRV[d]; const nx = bx + dx, ny = by + dy; return botWalkable(room, nx, ny) && !realDanger.has(idxOf(nx, ny)); });
+  bot.inputDir = opts.length ? opts[(Math.random() * opts.length) | 0] : 'none';
+}
 
 /* ----------------------------------------------------------------------------
  * 5. SIMULATION
@@ -906,6 +1087,9 @@ function simulate(room) {
     room.bombs = room.bombs.filter(b => !b.exploding);
   }
 
+  // AI bots decide their inputs (same rules as humans)
+  for (const p of room.players.values()) if (p.isBot && p.spawned && p.alive) botThink(p, room);
+
   // movement
   for (const p of room.players.values()) if (p.spawned && p.alive) updateMovement(p, room);
 
@@ -1224,6 +1408,22 @@ io.on('connection', (socket) => {
     if (arena === 'random' || ARENAS.includes(arena)) { room.arenaPick = arena; emitRoomState(room); }
   });
 
+  socket.on('addBot', ({ difficulty } = {}) => {
+    const room = currentRoom();
+    if (!room || socket.id !== room.hostId || room.ranked || room.phase !== 'lobby') return;
+    const slot = freeSlot(room);
+    if (slot < 0) return;
+    const bot = makeBotPlayer(slot, BOT_DIFF[difficulty] ? difficulty : 'normal');
+    room.players.set(bot.id, bot);
+    emitRoomState(room); maybeStartCountdown(room);
+  });
+  socket.on('removeBot', () => {
+    const room = currentRoom();
+    if (!room || socket.id !== room.hostId || room.phase !== 'lobby') return;
+    const bots = [...room.players.values()].filter(p => p.isBot);
+    if (bots.length) { room.players.delete(bots[bots.length - 1].id); emitRoomState(room); }
+  });
+
   socket.on('setReady', ({ ready } = {}) => {
     const room = currentRoom(), p = currentPlayer();
     if (!room || !p || (room.phase !== 'lobby' && room.phase !== 'countdown')) return;
@@ -1265,8 +1465,9 @@ io.on('connection', (socket) => {
     room.players.delete(socket.id);
     delete socketRoom[socket.id];
     socket.leave(room.code);
-    if (room.players.size === 0) { destroyRoom(room); return; }
-    if (wasHost) room.hostId = room.players.keys().next().value;   // reassign host
+    const humans = [...room.players.values()].filter(p => !p.isBot);
+    if (humans.length === 0) { destroyRoom(room); return; }         // no humans -> close (drops bots)
+    if (wasHost) room.hostId = humans[0].id;                        // reassign host to a human
     if (room.phase === 'countdown' && !lobbyReadyToStart(room)) room.phase = 'lobby';
     emitRoomState(room);
   }
